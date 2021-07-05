@@ -17,10 +17,11 @@ data class CourseModel(
     var rating: Float,
     var slug: String?,
     var coverImage: String,
-    var categoryId: Int,
-    var faq: String? = ""
+    var categoryId: Int
 ) {
-    constructor() : this("", "", "", "", "",
+    constructor() : this(
+        "", "", "", "", "",
         "", "", 0, 0f, "",
-        "", -1, "")
+        "", -1
+    )
 }

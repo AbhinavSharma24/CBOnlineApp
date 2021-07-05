@@ -1,269 +1,304 @@
 package com.codingblocks.cbonlineapp.course
 
-import android.content.Context
+import android.app.Activity
+import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
-import android.os.Handler
-import android.view.View
-import android.widget.ProgressBar
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.res.ResourcesCompat
+import android.view.Menu
+import android.view.MenuItem
+import android.widget.ImageView
+import androidx.activity.invoke
+import androidx.activity.result.ActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.core.app.ActivityOptionsCompat
+import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.isVisible
-import androidx.core.widget.NestedScrollView
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.LinearSnapHelper
-import androidx.recyclerview.widget.SnapHelper
+import androidx.recyclerview.widget.RecyclerView
 import com.codingblocks.cbonlineapp.BuildConfig
 import com.codingblocks.cbonlineapp.R
-import com.codingblocks.cbonlineapp.commons.OnCartItemClickListener
-import com.codingblocks.cbonlineapp.course.batches.BatchesAdapter
-import com.codingblocks.cbonlineapp.insturctors.InstructorDataAdapter
-import com.codingblocks.cbonlineapp.util.Components
-import com.codingblocks.cbonlineapp.util.MediaUtils.getYotubeVideoId
-import com.codingblocks.cbonlineapp.util.extensions.loadImage
-import com.codingblocks.cbonlineapp.util.extensions.observeOnce
-import com.codingblocks.cbonlineapp.util.extensions.observer
-import com.codingblocks.onlineapi.models.Course
-import com.codingblocks.onlineapi.models.Sections
-import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.codingblocks.cbonlineapp.auth.LoginActivity
+import com.codingblocks.cbonlineapp.baseclasses.BaseCBActivity
+import com.codingblocks.cbonlineapp.baseclasses.STATE
+import com.codingblocks.cbonlineapp.commons.InstructorListAdapter
+import com.codingblocks.cbonlineapp.course.adapter.CourseListAdapter
+import com.codingblocks.cbonlineapp.course.adapter.ItemClickListener
+import com.codingblocks.cbonlineapp.course.adapter.WishlistListener
+import com.codingblocks.cbonlineapp.course.batches.CourseTierFragment
+import com.codingblocks.cbonlineapp.course.batches.RUNTIERS
+import com.codingblocks.cbonlineapp.course.checkout.CheckoutActivity
+import com.codingblocks.cbonlineapp.dashboard.DashboardActivity
+import com.codingblocks.cbonlineapp.util.COURSE_ID
+import com.codingblocks.cbonlineapp.util.COURSE_LOGO
+import com.codingblocks.cbonlineapp.util.CustomDialog
+import com.codingblocks.cbonlineapp.util.LOGIN
+import com.codingblocks.cbonlineapp.util.LOGO_TRANSITION_NAME
+import com.codingblocks.cbonlineapp.util.MediaUtils
+import com.codingblocks.cbonlineapp.util.UNAUTHORIZED
+import com.codingblocks.cbonlineapp.util.extensions.getLoadingDialog
+import com.codingblocks.cbonlineapp.util.extensions.getPrefs
+import com.codingblocks.cbonlineapp.util.extensions.getSpannableSring
+import com.codingblocks.cbonlineapp.util.extensions.setRv
+import com.codingblocks.cbonlineapp.util.extensions.setToolbar
+import com.codingblocks.cbonlineapp.util.glide.GlideApp
+import com.codingblocks.cbonlineapp.util.glide.loadImage
+import com.codingblocks.cbonlineapp.util.livedata.observer
+import com.codingblocks.onlineapi.ErrorStatus
+import com.codingblocks.onlineapi.models.Tags
+import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.chip.Chip
 import com.google.android.youtube.player.YouTubeInitializationResult
 import com.google.android.youtube.player.YouTubePlayer
 import com.google.android.youtube.player.YouTubePlayerSupportFragment
-import io.github.inflationx.viewpump.ViewPumpContextWrapper
+import io.noties.markwon.Markwon
+import io.noties.markwon.ext.tables.TablePlugin
+import io.noties.markwon.ext.tables.TableTheme
 import kotlinx.android.synthetic.main.activity_course.*
-import kotlinx.android.synthetic.main.bottom_cart_sheet.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
 import org.jetbrains.anko.AnkoLogger
+import org.jetbrains.anko.design.snackbar
+import org.jetbrains.anko.intentFor
+import org.jetbrains.anko.share
+import org.jetbrains.anko.startActivity
 import org.jetbrains.anko.toast
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
-class CourseActivity : AppCompatActivity(), AnkoLogger {
-    lateinit var courseId: String
-    lateinit var courseName: String
-    private lateinit var progressBar: Array<ProgressBar?>
-    private lateinit var batchAdapter: BatchesAdapter
-    private lateinit var instructorAdapter: InstructorDataAdapter
-    private lateinit var youtubePlayerInit: YouTubePlayer.OnInitializedListener
-    private val batchSnapHelper: SnapHelper = LinearSnapHelper()
-    private val sectionAdapter = SectionsDataAdapter(ArrayList())
+class CourseActivity : BaseCBActivity(), AnkoLogger, AppBarLayout.OnOffsetChangedListener {
 
+    private val courseId by lazy {
+        intent.getStringExtra(COURSE_ID)!!
+    }
+    private val courseLogoImage by lazy {
+        intent.getStringExtra(LOGO_TRANSITION_NAME)
+    }
+    private val courseLogoUrl by lazy {
+        intent.getStringExtra(COURSE_LOGO)
+    }
+    val loadingDialog: AlertDialog by lazy {
+        getLoadingDialog()
+    }
     private val viewModel by viewModel<CourseViewModel>()
 
+    private val projectAdapter = CourseProjectAdapter()
+    private val instructorAdapter = InstructorListAdapter()
+    private val courseSectionListAdapter = CourseSectionListAdapter()
+    private val courseCardListAdapter = CourseListAdapter()
+    private lateinit var youtubePlayerInit: YouTubePlayer.OnInitializedListener
+    private var youtubePlayer: YouTubePlayer? = null
+
+    private val startForResult =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result: ActivityResult ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                toast(getString(R.string.logged_in))
+            }
+        }
+
+    private val itemClickListener: ItemClickListener by lazy {
+        object : ItemClickListener {
+            override fun onClick(id: String, name: String, logo: ImageView) {
+                val intent = Intent(this@CourseActivity, CourseActivity::class.java)
+                intent.putExtra(COURSE_ID, id)
+                intent.putExtra(COURSE_LOGO, name)
+                intent.putExtra(LOGO_TRANSITION_NAME, ViewCompat.getTransitionName(logo))
+
+                val options: ActivityOptionsCompat =
+                    ActivityOptionsCompat.makeSceneTransitionAnimation(
+                        this@CourseActivity,
+                        logo,
+                        ViewCompat.getTransitionName(logo)!!
+                    )
+                startActivity(intent, options.toBundle())
+            }
+        }
+    }
+
+    private val wishlistListener: WishlistListener by lazy {
+        object : WishlistListener {
+            override fun onWishListClickListener(id: String) {
+                if (getPrefs().SP_JWT_TOKEN_KEY.isNotEmpty()) {
+                    viewModel.changeWishlistStatus(id)
+                } else {
+                    CustomDialog.showConfirmation(applicationContext, LOGIN) {
+                        if (it) {
+                            startActivity(intentFor<LoginActivity>())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    var endLink: String = ""
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_course)
-        courseId = intent.getStringExtra("courseId")
-        courseName = intent.getStringExtra("courseName") ?: ""
-        val image = intent.getStringExtra("courseLogo") ?: ""
-        setImageAndTitle(image, courseName)
+        supportPostponeEnterTransition()
+        setToolbar(courseToolbar)
+        viewModel.id = courseId
+        viewModel.fetchCourse()
 
-        init()
-    }
-
-    private fun setImageAndTitle(image: String, courseName: String) {
-        coursePageLogo.loadImage(image)
-        title = courseName
-        coursePageTitle.text = courseName
-    }
-
-    private fun init() {
-        progressBar = arrayOf(
-            courseProgress1,
-            courseProgress2,
-            courseProgress3,
-            courseProgress4,
-            courseProgress5
+        courseProjectsRv.setRv(this@CourseActivity, projectAdapter, true)
+        courseSuggestedRv.setRv(
+            this@CourseActivity,
+            courseCardListAdapter,
+            orientation = RecyclerView.HORIZONTAL,
+            space = 28f
         )
-        setSupportActionBar(toolbar)
-        supportActionBar?.setHomeButtonEnabled(true)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        viewModel.sheetBehavior = BottomSheetBehavior.from(bottom_sheet)
-        viewModel.sheetBehavior?.state = BottomSheetBehavior.STATE_HIDDEN
-
-        fetchCourse()
-    }
-
-    private fun showBottomSheet(newId: String, newName: String) {
-        viewModel.image.observer(this) {
-            newImage.loadImage(it ?: "")
-        }
-        viewModel.name.observer(this) {
-            oldTitle.text = it
-            newTitle.text = newName
-        }
-        checkoutBtn.setOnClickListener {
-            viewModel.sheetBehavior?.state = BottomSheetBehavior.STATE_HIDDEN
-            Components.openChrome(this, "https://dukaan.codingblocks.com/mycart")
-        }
-        continueBtn.setOnClickListener {
-            viewModel.sheetBehavior?.state = BottomSheetBehavior.STATE_HIDDEN
-            viewModel.clearCartProgress.observeOnce {
-                if (it) addToCart(newId, newName)
-                else toast("Error in Clearing Cart, please try again")
+        courseInstructorRv.setRv(this@CourseActivity, instructorAdapter)
+        courseContentRv.setRv(this@CourseActivity, courseSectionListAdapter, true)
+        if (!courseLogoImage.isNullOrEmpty()) {
+            courseLogo.transitionName = courseLogoImage
+            courseLogo.loadImage(courseLogoUrl!!) {
+                if (it)
+                    supportStartPostponedEnterTransition()
+                else {
+                    toast("No Internet Connection Available")
+                    onBackPressed()
+                }
             }
-            viewModel.clearCart()
         }
-        viewModel.getCart()
-    }
+        GlideApp.with(this).load(R.drawable.wildcraft).into(goodiesImg)
+        viewModel.course.observer(this) { course ->
+            endLink = course.slug.toString()
+            showTags(course.tags)
+            val tableTheme: TableTheme = TableTheme.create(this).asBuilder()
+                .tableBorderColor(ContextCompat.getColor(this, R.color.colorPrimaryDark))
+                .build()
+            val markWon = Markwon.builder(this)
+                .usePlugin(TablePlugin.create(tableTheme))
+                .build()
+            courseSummaryTv.post {
+                markWon.setMarkdown(courseSummaryTv, course.summary)
+            }
 
-    private fun fetchInstructors(id: String) {
-        instructorAdapter = InstructorDataAdapter(ArrayList())
-
-        instructorRv.layoutManager = LinearLayoutManager(this)
-        instructorRv.adapter = instructorAdapter
-
-//        viewModel.getInstructorWithCourseId(id).observer(this) {
-//            instructorAdapter.setData(it as ArrayList<Instructor>)
-//            var instructors = "Mentors: "
-//            for (i in 0 until it.size) {
-//                if (i == 0) {
-//                    instructors += it[i].name
-//                } else if (i == 1) {
-//                    instructors += ", ${it[i].name}"
-//                } else if (i >= 2) {
-//                    instructors += "+ " + (it.size - 2) + " more"
-//                    break
+            course.faq?.let {
+                faqTv.isVisible = true
+                courseFaqTv.isVisible = true
+                markWon.setMarkdown(courseFaqTv, it)
+            }
+            title = course.title
+            shortTv.text = course.subtitle
+            ratingBar.rating = course.rating
+            ratingTv.text =
+                getSpannableSring("${course.rating}/5.0, ", "${course.reviewCount} ratings")
+            if (courseLogoUrl.isNullOrEmpty()) courseLogo.loadImage(course.logo)
+            courseBackdrop.loadImage(course.coverImage ?: "")
+            setYoutubePlayer(course.promoVideo ?: "")
+            viewModel.fetchProjects(course.projects)
+            course.getTrialRun(RUNTIERS.LITE.name)?.let {
+                trialBtn.setOnClickListener { _ ->
+                    viewModel.enrollTrial(it.id)
+                }
+            }
+//            course.getContentRun(RUNTIERS.PREMIUM.name)?.let {
+//                it.sections?.let { sectionList -> viewModel.fetchSections(sectionList) }
+//                val price = it.price.toInt()
+//                if (price < 10) {
+//                    goodiesImg.isVisible = false
 //                }
-//                coursePageMentors.text = instructors
 //            }
-//        }
-    }
+            instructorAdapter.submitList(course.instructors)
+        }
 
-    private fun fetchCourse() {
-        viewModel.fetchedCourse.observeOnce { course ->
+        viewModel.projects.observer(this) { projects ->
+            projectsTv.isVisible = !projects.isNullOrEmpty()
+            projectAdapter.submitList(projects)
+        }
 
-            fetchInstructors(course.id)
-            viewModel.getCourseFeatures(courseId).observer(this) {
-                it.forEachIndexed { index, courseFeatures ->
-                    when (index) {
-                        0 -> {
-                            feature_icon_1.loadImage(courseFeatures.icon, scale = true)
-                            features_text_1.text = courseFeatures.text
-                        }
-                        1 -> {
-                            feature_icon_2.loadImage(courseFeatures.icon, scale = true)
-                            features_text_2.text = courseFeatures.text
-                        }
-                        2 -> {
-                            feature_icon_3.loadImage(courseFeatures.icon, scale = true)
-                            features_text_3.text = courseFeatures.text
-                        }
-                        3 -> {
-                            feature_icon_4.loadImage(courseFeatures.icon, scale = true)
-                            features_text_4.text = courseFeatures.text
+        viewModel.sections.observer(this) { sections ->
+            courseSectionListAdapter.submitList(sections.take(5))
+        }
+
+        viewModel.suggestedCourses.observer(this) { courses ->
+            courseCardListAdapter.submitList(courses)
+        }
+
+        viewModel.snackbar.observer(this) {
+            courseActivity.snackbar(it)
+        }
+
+        viewModel.errorLiveData.observer(this) {
+            when (it) {
+                ErrorStatus.NO_CONNECTION -> {
+                    showOffline()
+                }
+                ErrorStatus.UNAUTHORIZED -> {
+                    CustomDialog.showConfirmation(this, UNAUTHORIZED) { result ->
+                        if (result) {
+                            startForResult(intentFor<LoginActivity>())
+                        } else {
+                            finish()
                         }
                     }
                 }
-            }
-
-            batchAdapter = BatchesAdapter(ArrayList(), object : OnCartItemClickListener {
-                override fun onItemClick(id: String, name: String) {
-                    addToCart(id, name)
-                }
-            })
-            batchRv.layoutManager =
-                LinearLayoutManager(this@CourseActivity, LinearLayoutManager.HORIZONTAL, false)
-            batchRv.adapter = batchAdapter
-            batchSnapHelper.attachToRecyclerView(batchRv)
-            setImageAndTitle(course.logo, course.title)
-            coursePageSubtitle.text = course.subtitle
-            if (course.faq.isNullOrEmpty()) {
-                faqMarkdown.isVisible = false
-                faqTitleTv.isVisible = false
-                faqView.isVisible = false
-            } else {
-                faqMarkdown.loadMarkdown(course.faq)
-            }
-            coursePageSummary.loadMarkdown(course.summary)
-            trialBtn.setOnClickListener {
-                if (course.runs != null) {
-                    viewModel.enrollTrialProgress.observeOnce {
-                        Components.showconfirmation(this@CourseActivity, "trial")
-                    }
-                    viewModel.enrollTrial(course.runs?.get(0)?.id ?: "")
-                } else {
-                    toast("No available runs right now ! Please check back later")
-                }
-            }
-            course.runs?.let { batchAdapter.setData(it) }
-            buyBtn.setOnClickListener {
-                if (course.runs != null) {
-                    focusOnView(scrollView, batchRv)
-                } else {
-                    toast("No available runs right now ! Please check back later")
-                }
-            }
-            fetchTags(course)
-            showPromoVideo(course.promoVideo)
-            fetchRating(course.id)
-            if (!course.runs.isNullOrEmpty()) {
-                val sections = course.runs?.get(0)?.sections
-                val sectionsList = ArrayList<Sections>()
-                rvExpendableView.layoutManager = LinearLayoutManager(this@CourseActivity)
-                rvExpendableView.adapter = sectionAdapter
-                runOnUiThread {
-                    sections?.forEachIndexed { index, section ->
-                        GlobalScope.launch(Dispatchers.IO) {
-                            val response2 = viewModel.getCourseSection(section.id)
-                            if (response2.isSuccessful) {
-                                val value = response2.body()
-                                value?.order = index
-                                if (value != null) {
-                                    sectionsList.add(value)
-                                }
-                                if (sectionsList.size == sections.size) {
-                                    sectionsList.sortBy { it.order }
-                                    sectionAdapter.setData(sectionsList)
-                                }
-                            } else {
-                                toast("Error ${response2.code()}")
-                            }
-                        }
-                    }
+                ErrorStatus.TIMEOUT -> {
+//                    Snackbar.make(courseRootView, it, Snackbar.LENGTH_INDEFINITE)
+//                        .setAnimationMode(Snackbar.ANIMATION_MODE_SLIDE)
+//                        .setAction("Retry") {
+//                            viewModel.fetchCourse()
+//                        }
+//                        .show()
                 }
             }
         }
-        viewModel.getCourse(courseId)
-    }
+        appbar.addOnOffsetChangedListener(this)
 
-    private fun fetchTags(course: Course) {
-        course.runs?.forEach { singleCourse ->
-            if (singleCourse.tags?.size == 0) {
-                tagstv.visibility = View.GONE
-                coursePagevtags.visibility = View.GONE
-                tagsChipgroup.visibility = View.GONE
-            } else {
-                tagstv.visibility = View.VISIBLE
-                coursePagevtags.visibility = View.VISIBLE
-                tagsChipgroup.visibility = View.VISIBLE
+        courseCardListAdapter.onItemClick = itemClickListener
+        courseCardListAdapter.wishlistListener = wishlistListener
 
-                singleCourse.tags?.forEach {
-                    val chip = Chip(this)
-                    chip.text = it.name
-                    val typeFace: Typeface? =
-                        ResourcesCompat.getFont(this.applicationContext, R.font.nunitosans_regular)
-                    chip.typeface = typeFace
-                    tagsChipgroup.addView(chip)
+        viewModel.addedToCartProgress.observer(this) {
+            when (it!!) {
+                STATE.LOADING -> loadingDialog.show()
+                STATE.ERROR -> loadingDialog.dismiss()
+                STATE.SUCCESS -> {
+                    loadingDialog.hide()
+                    startActivity<CheckoutActivity>()
                 }
             }
         }
-    }
-
-    private fun addToCart(id: String, name: String) {
-        viewModel.addedToCartProgress.observeOnce {
-            if (it) {
-                Components.openChrome(this, "https://dukaan.codingblocks.com/mycart")
-            } else {
-                showBottomSheet(id, name)
+        viewModel.enrollTrialProgress.observer(this) { status ->
+            when (status!!) {
+                STATE.LOADING -> loadingDialog.show()
+                STATE.ERROR -> loadingDialog.dismiss()
+                STATE.SUCCESS -> {
+                    loadingDialog.hide()
+                    startActivity(DashboardActivity.createDashboardActivityIntent(this, true))
+                    finish()
+                }
             }
         }
-        viewModel.addToCart(id)
+
+        viewAllTv.setOnClickListener {
+            val courseSectionAllFragment = CourseSectionAllFragment()
+
+            courseSectionAllFragment.show(supportFragmentManager, "courseSectionAllFragment")
+        }
+
+        batchBtn.setOnClickListener {
+            val courseTierFragment = CourseTierFragment()
+            courseTierFragment.show(supportFragmentManager, "CourseTierFragment")
+        }
     }
 
-    private fun showPromoVideo(promoVideo: String) {
+    var tagsList = ArrayList<String>()
+    private fun showTags(tags: ArrayList<Tags>?) {
+        tagsList.clear()
+        courseChipsGroup.removeAllViews()
+        with(!tags.isNullOrEmpty()) {
+            topicsTv.isVisible = this
+            courseChipsGroup.isVisible = this
+        }
+        tags?.take(5)?.forEach {
+            val chip = Chip(this)
+            it.name?.let { it1 -> tagsList.add(it1) }
+            chip.text = it.name
+            val font = Typeface.createFromAsset(assets, "fonts/gilroy_medium.ttf")
+            chip.typeface = font
+            courseChipsGroup.addView(chip)
+        }
+    }
+
+    private fun setYoutubePlayer(youtubeUrl: String) {
         youtubePlayerInit = object : YouTubePlayer.OnInitializedListener {
             override fun onInitializationFailure(
                 p0: YouTubePlayer.Provider?,
@@ -276,55 +311,64 @@ class CourseActivity : AppCompatActivity(), AnkoLogger {
                 youtubePlayerInstance: YouTubePlayer?,
                 p2: Boolean
             ) {
+                youtubePlayer = youtubePlayerInstance
                 if (!p2) {
-                    youtubePlayerInstance?.loadVideo(getYotubeVideoId(promoVideo))
+                    val url =
+                        if (youtubeUrl.isNotEmpty()) MediaUtils.getYoutubeVideoId(youtubeUrl) else ""
+                    youtubePlayerInstance?.cueVideo(url)
                 }
             }
         }
         val youTubePlayerSupportFragment =
-            supportFragmentManager.findFragmentById(R.id.displayYoutubeVideo) as YouTubePlayerSupportFragment?
+            supportFragmentManager.findFragmentById(R.id.youtubePlayerView) as YouTubePlayerSupportFragment?
         youTubePlayerSupportFragment?.initialize(BuildConfig.YOUTUBE_KEY, youtubePlayerInit)
     }
 
-    private fun fetchRating(id: String) {
-        viewModel.getCourseRating(id).observeOnce {
-            it.apply {
-                coursePageRatingCountTv.text = "$count Rating"
-                coursePageRatingTv.text = "$rating out of 5 stars"
-                coursePageRatingBar.rating = rating.toFloat()
-                for (i in 0 until progressBar.size) {
-                    progressBar[i]?.max = it.count * 1000
-                    progressBar[i]?.progress = it.stats[i].toInt() * 1000
-
-                    // Todo Add Animation on Focus
-                    //                    val anim =
-                    //                        ProgressBarAnimation(progressBar[i], 0F, it.stats[i].toInt() * 1000F)
-                    //                    anim.duration = 1500
-                    //                    progressBar[i]?.startAnimation(anim)
-                }
-            }
-        }
-        viewModel.getCourseRating(id)
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.course_menu, menu)
+        return true
     }
 
-    override fun attachBaseContext(newBase: Context) {
-        super.attachBaseContext(ViewPumpContextWrapper.wrap(newBase))
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.share -> {
+            share(
+                "Check out the course *$title* by Coding Blocks!\n\n" +
+                        shortTv.text + "\n\n" +
+                        "Major topics covered: \n" +
+                        tagsList.joinToString(separator = "\n", limit = 5) + "\n\n" +
+                        "https://online.codingblocks.com/courses/$endLink/"
+            )
+            true
+        }
+        android.R.id.home -> {
+            onBackPressed()
+            true
+        }
+        R.id.wishlist -> {
+            viewModel.changeWishlistStatus(courseId)
+            true
+        }
+        else -> super.onOptionsItemSelected(item)
     }
 
-    private fun focusOnView(scroll: NestedScrollView, view: View) {
-        Handler().post {
-            val vTop = view.top
-            val vBottom = view.bottom
-            val sWidth = scroll.width
-            scroll.smoothScrollTo(0, (vTop + vBottom - sWidth) / 2)
-        }
+    override fun onOffsetChanged(appBarLayout: AppBarLayout, verticalOffset: Int) {
+        val alpha =
+            (appBarLayout.totalScrollRange + verticalOffset).toFloat() / appBarLayout.totalScrollRange
+        courseLogo.alpha = alpha
+        shortTv.alpha = alpha
+        ratingBar.alpha = alpha
+        ratingTv.alpha = alpha
     }
 
     override fun onBackPressed() {
-        if (viewModel.sheetBehavior?.state == BottomSheetBehavior.STATE_EXPANDED) {
-            viewModel.sheetBehavior?.state = BottomSheetBehavior.STATE_HIDDEN
-        } else {
-            super.onBackPressed()
+        youtubePlayer?.release()
+        super.onBackPressed()
+    }
+
+    override fun onDestroy() {
+        if (loadingDialog.isShowing) {
+            loadingDialog.dismiss()
         }
+        super.onDestroy()
     }
 }

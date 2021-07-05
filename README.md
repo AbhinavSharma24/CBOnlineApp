@@ -1,11 +1,12 @@
+<div align="center">
+        
 # CBOnlineApp
 😎⚡️Online App for Coding Blocks Online
 
 [![codebeat badge](https://codebeat.co/badges/29c4e81e-f936-47a5-8d9f-2ac15cd9b13d)](https://codebeat.co/projects/github-com-coding-blocks-cbonlineapp-development)
 [![Maintainability](https://api.codeclimate.com/v1/badges/fb21e9bcd76c6905d68f/maintainability)](https://codeclimate.com/github/coding-blocks/CBOnlineApp/maintainability)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/3871ba02cd654b9585f1d9c8bc0f4365)](https://www.codacy.com/app/championswimmer/CBOnlineApp?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=coding-blocks/CBOnlineApp&amp;utm_campaign=Badge_Grade)
-[![Build Status](https://travis-ci.org/coding-blocks/CBOnlineApp.svg?branch=development)](https://travis-ci.org/coding-blocks/CBOnlineApp)
-[![CircleCI](https://circleci.com/gh/coding-blocks/CBOnlineApp.svg?style=svg)](https://circleci.com/gh/coding-blocks/CBOnlineApp)
+![Build](https://github.com/coding-blocks/CBOnlineApp/workflows/Build/badge.svg)
 
 An app to consume online courses available at https://online.codingblocks.com
 
@@ -13,21 +14,26 @@ Application is available here:
 
 <a href='https://play.google.com/store/apps/details?id=com.codingblocks.cbonlineapp'><img alt='Get it on Google Play' src='https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png' height="80"/></a>
 
+[![Downloads Badge](https://img.shields.io/endpoint?logo=google-play&url=https://api-playstore.rajkumaar.co.in/downloads?id=com.codingblocks.cbonlineapp&color=success)](https://play.google.com/store/apps/details?id=com.codingblocks.cbonlineapp) [![Rating Badge](https://img.shields.io/endpoint?logo=google-play&url=https://api-playstore.rajkumaar.co.in/rating?id=com.codingblocks.cbonlineapp&color=success)](https://play.google.com/store/apps/details?id=com.codingblocks.cbonlineapp) 
+
+</div>
+
 ## Screenshots
 <table>
         <tr>
-          <td><img src = "app/screenshots/1.png" height = "480" width="270"></td>
-          <td><img src = "app/screenshots/2.png" height = "480" width="270"></td>
-          <td><img src = "app/screenshots/3.png" height = "480" width="270"></td>
+          <td><img src = "app/screenshots/1.png" ></td>
+          <td><img src = "app/screenshots/2.png" ></td>
+          <td><img src = "app/screenshots/3.png" ></td>
         </tr>
         <tr>
-        <td><img src = "app/screenshots/4.png" height = "480" width="270"></td>
-        <td><img src = "app/screenshots/5.png" height = "480" width="270"></td>
-        <td><img src = "app/screenshots/6.png" height = "480" width="270"></td>
+        <td><img src = "app/screenshots/4.png" ></td>
+        <td><img src = "app/screenshots/5.png" ></td>
+        <td><img src = "app/screenshots/6.png" ></td>
         </tr>
         <tr>
-        <td><img src = "app/screenshots/7.png" height = "480" width="270"></td>
-        <td><img src = "app/screenshots/8.png" height = "480" width="270"></td>
+        <td><img src = "app/screenshots/7.png" ></td>
+        <td><img src = "app/screenshots/8.png" ></td>
+        <td><img src = "app/screenshots/9.png" ></td>
         </tr>
 </table>    
 
@@ -45,13 +51,13 @@ Application is available here:
 
 ### For first time Contributors
 
-First time contributors can read [CONTRIBUTING.md](/CONTRIBUTING.md) file for help regarding creating issues and sending pull requests.
+First-time contributors can read [CONTRIBUTING.md](/CONTRIBUTING.md) file for help regarding creating issues and sending pull requests.
 
 ### Branch Policy
 
 We have the following branches
 
- * **development** All development goes on in this branch. If you're making a contribution, you are supposed to make a pull request to _development_. PRs to development branch must pass a build check and a unit-test check on Circle CI.
+ * **development** All development goes on in this branch. If you're contributing, you are supposed to make a pull request to _development_. PRs to development branch must pass a build check and a unit-test check on Circle CI.
  * **master** This contains shipped code. After significant features/bugfixes are accumulated on development, we make a version update and make a release.
 ### Code practices
 
@@ -65,9 +71,9 @@ Please help us follow the best practices to make it easy for the reviewer as wel
 
 ### Join the development
 
-* Before you join development, please set up the project on your local machine, run it and go through the application completely. Press on any button you can find and see where it leads to. Explore. (Don't worry ... Nothing will happen to the app or to you due to the exploring :wink: Only thing that will happen is, you'll be more familiar with what is where and might even get some cool ideas on how to improve various aspects of the app.)
+* Before you join the development, please set up the project on your local machine, run it and go through the application completely. Press on any button you can find and see where it leads to. Explore. (Don't worry ... Nothing will happen to the app or you due to the exploring :wink: Only thing that will happen is, you'll be more familiar with what is where and might even get some cool ideas on how to improve various aspects of the app.)
 * If you would like to work on an issue, drop in a comment at the issue. If it is already assigned to someone, but there is no sign of any work being done, please free to drop in a comment so that the issue can be assigned to you if the previous assignee has dropped it entirely.
 
 ## For Testers: Testing the App
 If you are a tester and want to test the app, you have two ways to do that:
-1. **Installing APK on your device:** You can get debug APK as well as Release APK in apk branch of the repository. After each PR merge, both the APKs are automatically updated. So, just download the APK you want and install it on your device. The APKs will always be the latest one.
+1. **Installing APK on your device:** You can get debug APK as well as Release APK in the apk branch of the repository. After each PR merge, both the APKs are automatically updated. So, just download the APK you want and install it on your device. The APKs will always be the latest one.

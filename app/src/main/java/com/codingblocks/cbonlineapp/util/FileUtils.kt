@@ -2,13 +2,16 @@ package com.codingblocks.cbonlineapp.util
 
 import android.content.Context
 import android.os.Environment
-import androidx.appcompat.app.AlertDialog
-import com.codingblocks.cbonlineapp.R
+import android.util.Log
+import com.codingblocks.cbonlineapp.settings.SettingsActivity
+import com.codingblocks.cbonlineapp.util.PreferenceHelper.Companion.getPrefs
 import com.codingblocks.cbonlineapp.util.extensions.folderSize
 import com.codingblocks.cbonlineapp.util.extensions.getPrefs
-import kotlinx.android.synthetic.main.custom_dialog.view.*
-import org.jetbrains.anko.layoutInflater
+import org.jetbrains.anko.intentFor
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
 
 const val FILE_THRESHOLD = 256000
 const val GB_TO_KB = 1024 * 1024
@@ -16,7 +19,11 @@ const val GB_TO_KB = 1024 * 1024
 object FileUtils {
 
     private fun getCommonPath(context: Context) =
-        context.getExternalFilesDir(Environment.getDataDirectory().absolutePath)
+        if (getPrefs(context).SP_SD_CARD) {
+            context.getExternalFilesDirs(Environment.getDataDirectory().absolutePath)[1]
+        } else {
+            context.getExternalFilesDir(Environment.getDataDirectory().absolutePath)
+        }
 
     fun deleteDatabaseFile(context: Context, databaseName: String) {
         val databases = File(context.applicationInfo.dataDir + "/databases")
@@ -34,6 +41,15 @@ object FileUtils {
         }
     }
 
+    fun deleteRecursive(fileOrDirectory: File) {
+        if (fileOrDirectory.isDirectory) {
+            fileOrDirectory.listFiles()?.forEach {
+                deleteRecursive(it)
+            }
+        }
+        fileOrDirectory.delete()
+    }
+
     fun checkIfCannotDownload(context: Context): Boolean {
         val available = context.getPrefs().SP_DATA_LIMIT.times(GB_TO_KB).toInt()
         val sizeAfterDownload = getCommonPath(context)?.let { folderSize(it).div(1024).plus(FILE_THRESHOLD) }
@@ -47,37 +63,50 @@ object FileUtils {
             for (file in files)
                 mutableFiles.add(file)
 
-            mutableFiles.sortWith(Comparator { o1, o2 ->
-                o1.lastModified().compareTo(o2.lastModified())
-            })
+            mutableFiles.sortWith(
+                Comparator { o1, o2 ->
+                    o1.lastModified().compareTo(o2.lastModified())
+                }
+            )
             mutableFiles[0].delete()
         }
     }
 
     fun showIfCleanDialog(context: Context, onCleanDialogListener: OnCleanDialogListener) {
-        val confirmDialog = AlertDialog.Builder(context).create()
-        val dialogView = context.layoutInflater.inflate(R.layout.custom_dialog, null)
-        dialogView.title.text = context.getString(R.string.clean_dialog_title)
-        dialogView.description.text = context.getString(R.string.clean_dialog_description)
-        dialogView.okBtn.text = context.getString(R.string.clean_dialog_okBtn)
-        dialogView.cancelBtn.text = context.getString(R.string.clean_dialog_cancelBtn)
-
-        dialogView.okBtn.setOnClickListener {
-            clearOldestDirectory(context)
-            onCleanDialogListener.onComplete()
-            confirmDialog.dismiss()
+        CustomDialog.showConfirmation(context, "file") {
+            if (it) {
+                clearOldestDirectory(context)
+                onCleanDialogListener.onComplete()
+            } else {
+                context.startActivity(context.intentFor<SettingsActivity>())
+            }
         }
-        dialogView.cancelBtn.setOnClickListener {
-            confirmDialog.dismiss()
-        }
-        confirmDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        confirmDialog.setView(dialogView)
-        confirmDialog.setCancelable(false)
-        confirmDialog.show()
     }
 
     fun checkDownloadFileExists(context: Context, lectureId: String): Boolean {
-        return File(getCommonPath(context), "/$lectureId").exists()
+        return File(getCommonPath(context), "/$lectureId").exists() && File(getCommonPath(context), "/$lectureId").totalSpace > 100000
+    }
+
+    fun loadJsonObjectFromAsset(context: Context, assetName: String, jsonType: String = "array"): Any? {
+        try {
+            val json = loadStringFromAsset(context, assetName)
+            return if (jsonType == "array")
+                JSONArray(json)
+            else
+                JSONObject(json!!)
+        } catch (e: Exception) {
+            Log.e("JsonUtils", e.toString())
+        }
+        return null
+    }
+
+    private fun loadStringFromAsset(context: Context, assetName: String): String? {
+        val `is`: InputStream = context.assets.open(assetName)
+        val size: Int = `is`.available()
+        val buffer = ByteArray(size)
+        `is`.read(buffer)
+        `is`.close()
+        return String(buffer)
     }
 }
 

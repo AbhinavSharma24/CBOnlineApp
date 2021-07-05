@@ -18,6 +18,7 @@ data class ContentModel(
     var contentable: String,
     var order: Int,
     var attempt_id: String,
+    var sectionTitle: String = "",
     @Embedded
     @Nullable
     var contentLecture: ContentLecture = ContentLecture(),
@@ -29,7 +30,7 @@ data class ContentModel(
     var contentVideo: ContentVideo = ContentVideo(),
     @Embedded
     @Nullable
-    var contentQna: ContentQna = ContentQna(),
+    var contentQna: ContentQnaModel = ContentQnaModel(),
     @Embedded
     @Nullable
     var contentCode: ContentCodeChallenge = ContentCodeChallenge(),
@@ -42,4 +43,7 @@ data class ContentModel(
 
     @Ignore
     var sectionId: String = ""
+
+    @Ignore
+    var premium: Boolean = true
 }

@@ -3,44 +3,54 @@ package com.codingblocks.cbonlineapp
 import android.net.Uri
 import android.os.Bundle
 import android.text.TextUtils
-import androidx.appcompat.app.AppCompatActivity
 import cn.campusapp.router.Router
-import com.codingblocks.cbonlineapp.home.HomeActivity
-import com.codingblocks.cbonlineapp.util.extensions.getPrefs
+import com.codingblocks.cbonlineapp.baseclasses.BaseCBActivity
+import com.codingblocks.cbonlineapp.dashboard.DashboardActivity
+import com.codingblocks.cbonlineapp.util.PreferenceHelper
+import com.codingblocks.cbonlineapp.util.extensions.openChrome
 import com.codingblocks.cbonlineapp.util.extensions.otherwise
-import org.jetbrains.anko.intentFor
+import org.koin.android.ext.android.inject
 
-class URLRouterActivity : AppCompatActivity() {
+class URLRouterActivity : BaseCBActivity() {
 
-    private fun fallBack() = startActivity(intentFor<HomeActivity>())
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        if (getPrefs().SP_JWT_TOKEN_KEY != "jwt_token") {
-            intent?.data?.let { uri ->
-
-                if (TextUtils.isEmpty(uri.host)) fallBack()
-                if (!uri.host!!.contains("online.codingblocks.com")) fallBack()
-
-                val pathSegments = uri.pathSegments
-                if (pathSegments.size < 2) fallBack()
-
-                when (pathSegments[0]) {
-                    "classroom" -> openRouter(uri)
-                    "courses" -> openRouter(uri)
-                    "player" -> openRouter(uri)
-                    else -> fallBack()
-                }
-            }
-
-                ?: finish()
+    private fun fallBack(uri: Uri, loggedIn: Boolean) {
+        if (uri.pathSegments.size > 1) {
+            openChrome("", uri = uri)
         } else {
-            fallBack()
+            startActivity(DashboardActivity.createDashboardActivityIntent(this, loggedIn))
         }
     }
 
+    private val sharedPrefs: PreferenceHelper by inject()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        intent?.data?.let { uri ->
+
+            if (TextUtils.isEmpty(uri.host)) fallBack(uri, true)
+            if (!uri.host!!.contains("online.codingblocks.com")) fallBack(uri, true)
+
+            val pathSegments = uri.pathSegments
+            if (pathSegments.size < 1) {
+                fallBack(uri, true)
+                finish()
+                return
+            }
+
+            when (pathSegments[0]) {
+                "classroom" -> openRouter(uri)
+                "courses" -> openRouter(uri)
+                "player" -> openRouter(uri)
+                "app" -> openRouter(uri)
+                else -> fallBack(uri, true)
+            }
+            finish()
+        }
+            ?: finish()
+    }
+
     private fun openRouter(uri: Uri) {
-        Router.open("activity://courseRun/$uri").otherwise { fallBack() }
+        Router.open("activity://courseRun/$uri").otherwise { fallBack(uri, true) }
         finish()
     }
 }

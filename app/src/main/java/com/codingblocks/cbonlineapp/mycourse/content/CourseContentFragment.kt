@@ -1,94 +1,198 @@
 package com.codingblocks.cbonlineapp.mycourse.content
 
+import android.app.ActivityManager
+import android.content.Context
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.fragment.app.Fragment
+import android.widget.PopupWindow
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSmoothScroller
+import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import androidx.work.BackoffPolicy
-import androidx.work.Constraints
-import androidx.work.Data
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequest
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.workDataOf
 import com.codingblocks.cbonlineapp.R
+import com.codingblocks.cbonlineapp.baseclasses.BaseCBFragment
 import com.codingblocks.cbonlineapp.commons.DownloadStarter
 import com.codingblocks.cbonlineapp.commons.SectionListClickListener
+import com.codingblocks.cbonlineapp.course.checkout.CheckoutActivity
 import com.codingblocks.cbonlineapp.database.ListObject
-import com.codingblocks.cbonlineapp.database.models.SectionContentHolder
+import com.codingblocks.cbonlineapp.database.models.ContentModel
 import com.codingblocks.cbonlineapp.database.models.SectionModel
+import com.codingblocks.cbonlineapp.mycourse.MyCourseActivity
 import com.codingblocks.cbonlineapp.mycourse.MyCourseViewModel
+import com.codingblocks.cbonlineapp.mycourse.content.codechallenge.CodeChallengeActivity
+import com.codingblocks.cbonlineapp.mycourse.content.document.PdfActivity
+import com.codingblocks.cbonlineapp.mycourse.content.player.VideoPlayerActivity.Companion.createVideoPlayerActivityIntent
+import com.codingblocks.cbonlineapp.mycourse.content.quiz.QuizActivity
+import com.codingblocks.cbonlineapp.util.CODE
 import com.codingblocks.cbonlineapp.util.CONTENT_ID
-import com.codingblocks.cbonlineapp.util.DownloadWorker
-import com.codingblocks.cbonlineapp.util.PROGRESS_ID
-import com.codingblocks.cbonlineapp.util.ProgressWorker
-import com.codingblocks.cbonlineapp.util.RUN_ATTEMPT_ID
+import com.codingblocks.cbonlineapp.util.DOCUMENT
+import com.codingblocks.cbonlineapp.util.LECTURE
+import com.codingblocks.cbonlineapp.util.QNA
 import com.codingblocks.cbonlineapp.util.SECTION_ID
-import com.codingblocks.cbonlineapp.util.SectionDownloadService
-import com.codingblocks.cbonlineapp.util.VIDEO_ID
-import com.codingblocks.cbonlineapp.util.extensions.getPrefs
-import com.codingblocks.cbonlineapp.util.extensions.observer
-import com.google.firebase.analytics.FirebaseAnalytics
+import com.codingblocks.cbonlineapp.util.VIDEO
+import com.codingblocks.cbonlineapp.util.extensions.applyDim
+import com.codingblocks.cbonlineapp.util.extensions.clearDim
+import com.codingblocks.cbonlineapp.util.extensions.getLoadingDialog
+import com.codingblocks.cbonlineapp.util.extensions.showDialog
+import com.codingblocks.cbonlineapp.util.livedata.observer
+import com.codingblocks.cbonlineapp.workers.DownloadService
+import com.codingblocks.cbonlineapp.workers.SectionDownloadService
 import kotlinx.android.synthetic.main.activity_my_course.*
 import kotlinx.android.synthetic.main.fragment_course_content.*
 import org.jetbrains.anko.AnkoLogger
-import org.jetbrains.anko.support.v4.alert
-import org.jetbrains.anko.support.v4.startService
-import org.jetbrains.anko.yesButton
+import org.jetbrains.anko.startActivity
+import org.jetbrains.anko.support.v4.intentFor
+import org.jetbrains.anko.support.v4.toast
 import org.koin.androidx.viewmodel.ext.android.sharedViewModel
-import java.util.concurrent.TimeUnit
 
-class CourseContentFragment : Fragment(), AnkoLogger, DownloadStarter {
+/*
+ *   Payment issues
+ *   multi select quizzes
+ *   pdf not issue
+ *   challenge can't be done
+ *   webinar - make,
+ *   make more category
+ *   expired,upgrade and pause-unpause
+ *   only course, free course
+ */
 
-    private lateinit var firebaseAnalytics: FirebaseAnalytics
-    lateinit var attemptId: String
-    private val sectionItemsAdapter = SectionItemsAdapter()
-    var areLecturesLoaded: Boolean = false
+const val SECTION_DOWNLOAD = "sectionDownload"
 
+class CourseContentFragment : BaseCBFragment(), AnkoLogger, DownloadStarter {
+
+    var popupWindowDogs: PopupWindow? = null
     var sectionitem = ArrayList<SectionModel>()
-
-    private val sectionListAdapter = SectionListAdapter(sectionitem)
-
-    private val viewModel by sharedViewModel<MyCourseViewModel>()
-
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-        firebaseAnalytics = FirebaseAnalytics.getInstance(requireContext())
-        arguments?.let {
-            attemptId = it.getString(RUN_ATTEMPT_ID) ?: ""
-        }
-        sectionItemsAdapter.starter = this
-        return inflater.inflate(R.layout.fragment_course_content, container, false)
+    var type: String = ""
+    private val dialog by lazy {
+        requireContext().getLoadingDialog()
     }
+    private val sectionItemsAdapter = SectionItemsAdapter()
+    private val sectionListAdapter = SectionListAdapter(sectionitem)
+    private val viewModel by sharedViewModel<MyCourseViewModel>()
+    private val mLayoutManager by lazy { LinearLayoutManager(requireContext()) }
+
+    val smoothScroller by lazy {
+        object : LinearSmoothScroller(context) {
+
+            override fun getVerticalSnapPreference(): Int {
+                return SNAP_TO_START
+            }
+        }
+    }
+
+    private val sectionListClickListener: SectionListClickListener =
+        object : SectionListClickListener {
+            override fun onClick(pos: Int, adapterPosition: Int) {
+                popupWindowDogs?.dismiss()
+                val position = adapterPosition - 2
+                if (position > 0) {
+                    mLayoutManager.scrollToPosition(sectionitem[adapterPosition - 2].pos)
+                    smoothScroller.targetPosition = pos
+                    mLayoutManager.startSmoothScroll(smoothScroller)
+                } else {
+                    mLayoutManager.scrollToPosition(sectionitem[adapterPosition + 2].pos)
+                    smoothScroller.targetPosition = pos
+                    mLayoutManager.startSmoothScroll(smoothScroller)
+                }
+            }
+        }
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?):
+        View? = inflater.inflate(R.layout.fragment_course_content, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        activity?.sectionList?.apply {
-            layoutManager = LinearLayoutManager(requireContext())
-            adapter = sectionListAdapter
+        viewModel.fetchSections()
+        typeChipGroup.setOnCheckedChangeListener { _, checkedId ->
+            when (checkedId) {
+                R.id.webinarChip -> viewModel.filters.value = VIDEO.also {
+                    type = VIDEO
+                }
+                R.id.lectureChip -> viewModel.filters.value = LECTURE.also {
+                    type = LECTURE
+                }
+                R.id.quizChip -> viewModel.filters.value = QNA.also {
+                    type = QNA
+                }
+                R.id.codeChip -> viewModel.filters.value = CODE.also {
+                    type = CODE
+                }
+                R.id.documentChip -> viewModel.filters.value = DOCUMENT.also {
+                    type = DOCUMENT
+                }
+                View.NO_ID -> viewModel.filters.value = "".also {
+                    type = ""
+                }
+            }
         }
+
+        popupWindowDogs = popUpWindowSection()
+
+        activity?.fab?.setOnClickListener {
+            // Todo Check for different screens
+            popupWindowDogs?.showAsDropDown(it, -280, -50, Gravity.BOTTOM)
+            view.applyDim(0.5F)
+        }
+
+        popupWindowDogs?.setOnDismissListener {
+            view.clearDim()
+        }
+
         swiperefresh.setOnRefreshListener {
             (activity as SwipeRefreshLayout.OnRefreshListener).onRefresh()
         }
         rvExpendableView.apply {
-            layoutManager = LinearLayoutManager(requireContext())
             adapter = sectionItemsAdapter
+            layoutManager = mLayoutManager
+        }
+        attachObservers()
+        sectionListAdapter.onSectionListClick = sectionListClickListener
+    }
+
+    private fun attachObservers() {
+
+        viewModel.progress.observer(thisLifecycleOwner) {
+            swiperefresh.isRefreshing = it
         }
 
-        viewModel.getAllContent().observer(this) { SectionContent ->
+//        viewModel.computedData.observe(thisLifecycleOwner, Observer {
+//                    info { it }
+//        })
+
+        viewModel.content.observer(thisLifecycleOwner) { sectionWithContentList ->
             sectionitem.clear()
             val consolidatedList = ArrayList<ListObject>()
-            val response = SectionContentHolder.groupContentBySection(SectionContent)
-            response.forEach { sectionContent ->
+            sectionWithContentList.forEach { sectionContent ->
                 var duration: Long = 0
                 var sectionComplete = 0
-                sectionContent.contents.forEach { content ->
+                var isDownloadEnabled = false
+                val list = if (viewModel.complete.value!!.isEmpty() && type.isEmpty()) {
+                    sectionContent.contents.sortedBy { it.order }
+                } else if (type.isEmpty()) {
+                    sectionContent.contents
+                        .filter { it.progress == viewModel.complete.value }
+                        .sortedBy { it.order }
+                } else if (viewModel.complete.value!!.isEmpty()) {
+                    sectionContent.contents
+                        .filter { it.contentable == type }
+                        .sortedBy { it.order }
+                } else {
+                    sectionContent.contents
+                        .filter { it.contentable == type }
+                        .filter { it.progress == viewModel.complete.value!! }
+                        .sortedBy { it.order }
+                }
+                list.forEach { content ->
+                    content.premium = sectionContent.section.premium
                     if (content.progress == "DONE") {
                         sectionComplete++
+                    }
+                    if (content.contentable == "lecture" && content.contentLecture.lectureUid.isNotEmpty() && !content.contentLecture.isDownloaded) {
+                        isDownloadEnabled = true
                     }
 
                     if (content.contentable == "lecture")
@@ -99,73 +203,37 @@ class CourseContentFragment : Fragment(), AnkoLogger, DownloadStarter {
                     // Map SectionId to ContentModel
                     content.sectionId = sectionContent.section.csid
                 }
-                consolidatedList.add(sectionContent.section.apply {
-                    totalContent = sectionContent.contents.size
+                val item = sectionContent.section.apply {
+                    totalContent = list.size
                     totalTime = duration
                     completedContent = sectionComplete
                     pos = consolidatedList.size
-                })
-                sectionitem.add(sectionContent.section)
+                    isSectionDownloadEnabled = isDownloadEnabled
+                }
+                if (item.totalContent > 0 || type.isEmpty()) {
+                    consolidatedList.add(item)
+                    sectionitem.add(sectionContent.section)
+                }
+                consolidatedList.addAll(list)
                 sectionListAdapter.notifyDataSetChanged()
 
-                consolidatedList.addAll(sectionContent.contents)
                 sectionItemsAdapter.submitList(consolidatedList)
-            }
-        }
 
-        /**
-         * Register a new observer to listen for data changes.
-         * Otherwise list scrolls to bottom
-         **/
-
-        viewModel.progress.observer(viewLifecycleOwner) {
-            swiperefresh.isRefreshing = it
-        }
-
-        viewModel.revoked.observer(viewLifecycleOwner) { value ->
-            if (value) {
-                alert {
-                    title = "Error Fetching Course"
-                    message = """
-                        There was an error downloading courseRun contents.
-                        Please contact support@codingblocks.com
-                        """.trimIndent()
-                    yesButton {
-                        it.dismiss()
-                        activity?.finish()
+                rvExpendableView.viewTreeObserver.addOnGlobalLayoutListener {
+                    if (sectionListAdapter.itemCount == 0) {
+                        (activity as MyCourseActivity).hideFab()
+                        rvExpendableView.visibility = View.GONE
+                        textview4_20.visibility = View.VISIBLE
+                    } else {
+                        if ((activity as MyCourseActivity).myCourseTabs.selectedTabPosition == 1)
+                        (activity as MyCourseActivity).showFab()
+                        rvExpendableView.visibility = View.VISIBLE
+                        textview4_20.visibility = View.GONE
                     }
-                    isCancelable = false
-                }.show()
+                }
             }
+            contentShimmer.isVisible = sectionWithContentList.isEmpty()
         }
-
-        val sectionListClickListener: SectionListClickListener = object : SectionListClickListener {
-            override fun onClick(pos: Int) {
-                rvExpendableView.smoothScrollToPosition(pos)
-            }
-        }
-        sectionListAdapter.onSectionListClick = sectionListClickListener
-    }
-
-    override fun updateProgress(contentId: String, progressId: String) {
-        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-        val progressData: Data = if (progressId.isNotEmpty()) {
-            workDataOf(CONTENT_ID to contentId, RUN_ATTEMPT_ID to attemptId, PROGRESS_ID to progressId)
-        } else {
-            workDataOf(CONTENT_ID to contentId, RUN_ATTEMPT_ID to attemptId)
-        }
-
-        val request: OneTimeWorkRequest =
-            OneTimeWorkRequestBuilder<ProgressWorker>()
-                .setConstraints(constraints)
-                .setInputData(progressData)
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 20, TimeUnit.SECONDS)
-                .build()
-//        Snackbar.make(contentRoot, "Progress Will Be Synced Once Your Device Get Online", Snackbar.LENGTH_SHORT)
-//            .setAnchorView(bottom_navigation).show()
-
-        WorkManager.getInstance()
-            .enqueue(request)
     }
 
     override fun startDownload(
@@ -175,54 +243,149 @@ class CourseContentFragment : Fragment(), AnkoLogger, DownloadStarter {
         attemptId: String,
         sectionId: String
     ) {
-        val constraints = if (getPrefs()?.SP_WIFI == true)
-            Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build()
-        else
-            Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-        val videoData = workDataOf(VIDEO_ID to videoId,
-            "title" to title,
-            SECTION_ID to sectionId,
-            RUN_ATTEMPT_ID to attemptId,
-            CONTENT_ID to contentId)
 
-        val request: OneTimeWorkRequest =
-            OneTimeWorkRequestBuilder<DownloadWorker>()
-                .setConstraints(constraints)
-                .setInputData(videoData)
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 20, TimeUnit.SECONDS)
-                .build()
-
-        WorkManager.getInstance()
-            .enqueue(request)
+        DownloadService.startService(requireContext(), sectionId, attemptId, videoId, contentId, title)
     }
 
-    override fun onDestroyView() {
-        super.onDestroyView()
+    override fun startSectionDownlod(sectionId: String) {
+        if (isMyServiceRunning(SectionDownloadService::class.java)) {
+            toast("One Section download is in progress")
+        } else {
+            SectionDownloadService.startService(requireContext(), sectionId, viewModel.attemptId!!)
+        }
     }
 
-    override fun setUserVisibleHint(isVisibleToUser: Boolean) {
-        super.setUserVisibleHint(isVisibleToUser)
-        if (isVisibleToUser && !areLecturesLoaded) {
-            if (view != null) {
-                val params = Bundle()
-                params.putString(FirebaseAnalytics.Param.ITEM_ID, getPrefs()?.SP_ONEAUTH_ID)
-                params.putString(FirebaseAnalytics.Param.ITEM_NAME, "ContentModel")
-                firebaseAnalytics.logEvent(FirebaseAnalytics.Event.VIEW_ITEM, params)
+    private fun popUpWindowSection(): PopupWindow {
+
+        val popupWindow = PopupWindow(requireContext())
+        val listViewDogs = RecyclerView(requireContext())
+        listViewDogs.adapter = sectionListAdapter
+        listViewDogs.layoutManager = LinearLayoutManager(requireContext())
+        popupWindow.isFocusable = true
+        popupWindow.setBackgroundDrawable(
+            resources.getDrawable(
+                R.drawable.background_custom_radio_buttons_unselected_state,
+                null
+            )
+        )
+        popupWindow.isOutsideTouchable = true
+        popupWindow.height = 1000
+        popupWindow.contentView = listViewDogs
+
+        return popupWindow
+    }
+
+    override fun onActivityCreated(savedInstanceState: Bundle?) {
+        super.onActivityCreated(savedInstanceState)
+        sectionItemsAdapter.starter = this
+        sectionItemsAdapter.onItemClick = {
+            when (it) {
+                is ContentModel -> with(it) {
+                    when (contentable) {
+                        DOCUMENT ->
+                            if (contentDocument.documentUid.isNotEmpty()) {
+                                viewModel.updateProgress(ccid)
+                                startActivity(
+                                    intentFor<PdfActivity>(
+                                        CONTENT_ID to ccid,
+                                        SECTION_ID to sectionId
+                                    )
+                                )
+                            } else
+                                checkSection(premium)
+                        LECTURE ->
+                            if (contentLecture.lectureUid.isNotEmpty())
+                                startActivity(
+                                    createVideoPlayerActivityIntent(requireContext(), ccid, sectionId)
+                                )
+                            else
+                                checkSection(premium)
+                        VIDEO ->
+                            if (contentVideo.videoUid.isNotEmpty()) {
+                                startActivity(
+                                    createVideoPlayerActivityIntent(requireContext(), ccid, sectionId)
+                                )
+                            } else
+                                checkSection(premium)
+                        QNA ->
+                            if (contentQna.qnaUid.isNotEmpty()) {
+                                viewModel.updateProgress(ccid)
+                                startActivity(
+                                    intentFor<QuizActivity>(
+                                        CONTENT_ID to ccid,
+                                        SECTION_ID to sectionId
+                                    )
+                                )
+                            } else
+                                checkSection(premium)
+                        CODE ->
+                            if (contentCode.codeUid.isNotEmpty()) {
+                                startActivity(
+                                    intentFor<CodeChallengeActivity>(
+                                        CONTENT_ID to ccid,
+                                        SECTION_ID to sectionId
+                                    )
+                                )
+                            } else
+                                checkSection(premium)
+                    }
+                }
             }
         }
     }
 
-    override fun startSectionDownlod(sectionId: String) {
-        startService<SectionDownloadService>(SECTION_ID to sectionId)
-    }
-
-    companion object {
-        @JvmStatic
-        fun newInstance(param1: String) =
-            CourseContentFragment().apply {
-                arguments = Bundle().apply {
-                    putString(RUN_ATTEMPT_ID, param1)
+    private fun checkSection(premium: Boolean) {
+        when {
+            viewModel.runStartEnd.first < System.currentTimeMillis() -> {
+                requireContext().showDialog(
+                    "expired",
+                    secondaryText = R.string.expired,
+                    primaryButtonText = R.string.buy_extension,
+                    cancelable = true
+                ) {
+                    // Show Extension Dialog
                 }
             }
+            premium -> {
+                requireContext().showDialog(
+                    "purchase",
+                    secondaryText = R.string.purchase,
+                    primaryButtonText = R.string.buy_now,
+                    cancelable = true
+                ) {
+                    if (it) {
+                        dialog.show()
+                        viewModel.addToCart().observer(thisLifecycleOwner) {
+                            dialog.hide()
+                            requireContext().startActivity<CheckoutActivity>()
+                        }
+                    }
+                }
+            }
+            viewModel.runStartEnd.second > System.currentTimeMillis() -> {
+                requireContext().showDialog(
+                    "Wait",
+                    secondaryText = R.string.wait,
+                    primaryButtonText = R.string.ok,
+                    cancelable = true
+                )
+            }
+
+            else -> {
+                requireContext().showDialog("revoked") {
+                    // open mail
+                }
+            }
+        }
+    }
+
+    private fun isMyServiceRunning(serviceClass: Class<*>): Boolean {
+        val manager = requireContext().getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceClass.name == service.service.className) {
+                return true
+            }
+        }
+        return false
     }
 }

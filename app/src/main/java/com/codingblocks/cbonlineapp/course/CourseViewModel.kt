@@ -1,79 +1,280 @@
 package com.codingblocks.cbonlineapp.course
 
+import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.liveData
-import com.codingblocks.cbonlineapp.database.CourseWithInstructorDao
-import com.codingblocks.cbonlineapp.database.FeaturesDao
-import com.codingblocks.cbonlineapp.util.extensions.retrofitCallback
-import com.codingblocks.onlineapi.Clients
+import androidx.lifecycle.viewModelScope
+import androidx.paging.DataSource
+import androidx.paging.LivePagedListBuilder
+import androidx.paging.PagedList
+import com.codingblocks.cbonlineapp.baseclasses.BaseCBViewModel
+import com.codingblocks.cbonlineapp.baseclasses.STATE
+import com.codingblocks.cbonlineapp.course.adapter.CourseDataSource
+import com.codingblocks.cbonlineapp.util.PreferenceHelper
+import com.codingblocks.cbonlineapp.util.extensions.runIO
+import com.codingblocks.onlineapi.ResultWrapper
+import com.codingblocks.onlineapi.fetchError
 import com.codingblocks.onlineapi.models.Course
-import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.codingblocks.onlineapi.models.Project
+import com.codingblocks.onlineapi.models.Sections
+import com.codingblocks.onlineapi.models.Wishlist
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 
 class CourseViewModel(
-    private val courseWithInstructorDao: CourseWithInstructorDao,
-    private val featuresDao: FeaturesDao
-
-) : ViewModel() {
-    private val repository = CourseRepository()
-
-    var sheetBehavior: BottomSheetBehavior<*>? = null
+    private val repo: CourseRepository,
+    val prefs: PreferenceHelper
+) : BaseCBViewModel() {
+    lateinit var id: String
+    var course = MutableLiveData<Course>()
+    var suggestedCourses = MutableLiveData<List<Course>>()
+    val findCourses = MutableLiveData<List<Course>>()
+    val projects = MutableLiveData<List<Project>>()
+    val sections = MutableLiveData<List<Sections>>()
+    val snackbar = MutableLiveData<String>()
+    private val allCourse = arrayListOf<Course>()
 
     var image: MutableLiveData<String> = MutableLiveData()
     var name: MutableLiveData<String> = MutableLiveData()
+    var addedToCartProgress: MutableLiveData<STATE> = MutableLiveData()
+    var enrollTrialProgress: MutableLiveData<STATE> = MutableLiveData()
 
-    var fetchedCourse: MutableLiveData<Course> = MutableLiveData()
-
-    var addedToCartProgress: MutableLiveData<Boolean> = MutableLiveData()
-    var clearCartProgress: MutableLiveData<Boolean> = MutableLiveData()
-    var enrollTrialProgress: MutableLiveData<Boolean> = MutableLiveData()
-
-    fun getInstructorWithCourseId(id: String) = courseWithInstructorDao.getInstructorWithCourseId(id)
-
-    fun getCart() {
-        Clients.api.getCart().enqueue(retrofitCallback { _, response ->
-            response?.body().let { json ->
-                json?.getAsJsonArray("cartItems")?.get(0)?.asJsonObject.let {
-                    image.value = it?.get("image_url")?.asString
-                    name.value = it?.get("productName")?.asString
-
-                    sheetBehavior?.state = BottomSheetBehavior.STATE_EXPANDED
+    fun fetchCourse() {
+        runIO {
+            when (val response = repo.getCourse(id)) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        course.postValue(body())
+                    } else {
+                        setError(fetchError(code()))
+                    }
                 }
             }
-        })
+        }
+        fetchAllCourses()
     }
 
-    fun clearCart() {
-        Clients.api.clearCart().enqueue(retrofitCallback { _, response ->
-            clearCartProgress.value = (response?.isSuccessful == true)
-        })
+    fun fetchAllCourses() {
+        runIO {
+            when (val response = repo.getAllCourses("0")) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (response.value.isSuccessful)
+                        response.value.body()?.let {
+                            it.get()?.let { it1 -> allCourse.addAll(it1) }
+                            suggestedCourses.postValue(allCourse)
+                        }
+                }
+            }
+        }
     }
 
-    fun getCourse(courseId: String) {
-        Clients.onlineV2JsonApi.courseById(courseId).enqueue(retrofitCallback { _, response ->
-            if (response?.isSuccessful == true)
-                fetchedCourse.value = response.body()
-        })
+    fun searchCourses(query: String) {
+        runIO {
+            when (val response = repo.findCourses(query)) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        findCourses.postValue(body())
+                    } else {
+                        setError(fetchError(code()))
+                    }
+                }
+            }
+        }
     }
 
-    fun getCourseFeatures(courseId: String) = featuresDao.getfeatures(courseId)
-
-    fun getCourseRating(id: String) = liveData(Dispatchers.IO) {
-        emit(repository.getRating(id))
+    fun fetchProjects(projectIdList: ArrayList<Project>?) {
+        val list = arrayListOf<Project>()
+        if (!projectIdList.isNullOrEmpty()) {
+            runIO {
+                val projectList = projectIdList.map {
+                    async(Dispatchers.IO) { repo.getProjects(it.id) } // runs in parallel in background thread
+                }.awaitAll()
+                projectList.forEach {
+                    when (it) {
+                        is ResultWrapper.GenericError -> setError(it.error)
+                        is ResultWrapper.Success -> with(it.value) {
+                            if (isSuccessful) {
+                                body()?.let { it1 -> list.add(it1) }
+                            } else {
+                                setError(fetchError(code()))
+                            }
+                        }
+                    }
+                }.also {
+                    projects.postValue(list)
+                }
+            }
+        } else {
+            projects.postValue(emptyList())
+        }
     }
 
-    suspend fun getCourseSection(id: String) = repository.getCourseSections(id)
+    // Todo - Improvise this
+    fun fetchSections(sectionIdList: ArrayList<Sections>) {
+        val list = arrayListOf<Sections>()
+        if (!sectionIdList.isNullOrEmpty()) {
+            runIO {
+                val sectionList = sectionIdList.map {
+                    async(Dispatchers.IO) { repo.getSection(it.id) } // runs in parallel in background thread
+                }.awaitAll()
+                sectionList.forEach {
+                    when (it) {
+                        is ResultWrapper.GenericError -> setError(it.error)
+                        is ResultWrapper.Success -> with(it.value) {
+                            if (isSuccessful) {
+                                body()?.let { it1 -> list.add(it1) }
+                            } else {
+                                setError(fetchError(code()))
+                            }
+                        }
+                    }
+                }.also {
+                    sections.postValue(list)
+                }
+            }
+        }
+    }
+
+    fun clearCart(id: String) {
+        addedToCartProgress.postValue(STATE.LOADING)
+        runIO {
+            when (val response = repo.clearCart()) {
+                is ResultWrapper.GenericError -> {
+                    enrollTrialProgress.postValue(STATE.ERROR)
+                    addToCart(id)
+                    setError(response.error)
+                }
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        addToCart(id)
+                    } else {
+                        enrollTrialProgress.postValue(STATE.ERROR)
+                        addToCart(id)
+                        setError(fetchError(code()))
+                    }
+                }
+            }
+        }
+    }
 
     fun enrollTrial(id: String) {
-        Clients.api.enrollTrial(id).enqueue(retrofitCallback { _, response ->
-            enrollTrialProgress.value = (response?.isSuccessful == true)
-        })
+        enrollTrialProgress.postValue(STATE.LOADING)
+        runIO {
+            when (val response = repo.enrollToTrial(id)) {
+
+                is ResultWrapper.GenericError -> {
+                    enrollTrialProgress.postValue(STATE.ERROR)
+                    setError(response.error)
+                }
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        enrollTrialProgress.postValue(STATE.SUCCESS)
+                    } else {
+                        enrollTrialProgress.postValue(STATE.ERROR)
+                        setError(fetchError(code()))
+                    }
+                }
+            }
+        }
     }
 
-    fun addToCart(id: String) {
-        Clients.api.addToCart(id).enqueue(retrofitCallback { _, response ->
-            addedToCartProgress.value = (response?.isSuccessful ?: false)
-        })
+    private fun addToCart(id: String) {
+        runIO {
+            when (val response = repo.addToCart(id)) {
+                is ResultWrapper.GenericError -> {
+                    enrollTrialProgress.postValue(STATE.ERROR)
+                    setError(response.error)
+                }
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        addedToCartProgress.postValue(STATE.SUCCESS)
+                    } else {
+                        addedToCartProgress.postValue(STATE.ERROR)
+                        setError(fetchError(code()))
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Paged Course List
+     */
+    private var courseLiveData: LiveData<PagedList<Course>>
+
+    init {
+        val config = PagedList.Config.Builder()
+            .setPageSize(9)
+            .setEnablePlaceholders(true)
+            .build()
+        courseLiveData = initializedPagedListBuilder(config).build()
+    }
+
+    fun getCourses(): LiveData<PagedList<Course>> = courseLiveData
+
+    private fun initializedPagedListBuilder(config: PagedList.Config):
+        LivePagedListBuilder<String, Course> {
+
+            val dataSourceFactory = object : DataSource.Factory<String, Course>() {
+                override fun create(): DataSource<String, Course> {
+                    return CourseDataSource(viewModelScope)
+                }
+            }
+            return LivePagedListBuilder<String, Course>(dataSourceFactory, config)
+        }
+
+    fun changeWishlistStatus(id: String) {
+        runIO {
+            when (val response = repo.checkIfWishlisted(id)) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        if (response.value.body()?.id != null) {
+                            response.value.body()?.let { removeWishlist(it.id) }
+                        } else {
+                            addWishlist(id)
+                        }
+                    } else {
+                        setError(fetchError(code()))
+                    }
+                }
+            }
+        }
+    }
+
+    fun addWishlist(id: String) {
+        val wishlist = Wishlist(Course(id))
+        runIO {
+            when (val response = repo.addWishlist(wishlist)) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> {
+                    if (response.value.isSuccessful) {
+                        snackbar.postValue("Course added to Wishlist")
+                    } else {
+                        setError(fetchError(response.value.code()))
+                    }
+                }
+            }
+        }
+    }
+
+    fun removeWishlist(courseSingle: String) {
+        runIO {
+            when (val response = repo.removeWishlist(courseSingle)) {
+                is ResultWrapper.GenericError -> {
+                    setError(response.error)
+                }
+                is ResultWrapper.Success -> {
+                    if (response.value.isSuccessful) {
+                        snackbar.postValue("Course removed from Wishlist")
+                    } else {
+                        setError(fetchError(response.value.code()))
+                    }
+                }
+            }
+        }
     }
 }

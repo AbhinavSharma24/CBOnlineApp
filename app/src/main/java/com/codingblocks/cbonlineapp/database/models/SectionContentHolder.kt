@@ -3,8 +3,10 @@ package com.codingblocks.cbonlineapp.database.models
 import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
-import androidx.room.ForeignKey
+import androidx.room.Ignore
 import androidx.room.Index
+import androidx.room.Junction
+import androidx.room.Relation
 
 class SectionContentHolder {
     @Entity(
@@ -12,18 +14,6 @@ class SectionContentHolder {
         indices = [
             Index(value = ["section_id"]),
             Index(value = ["content_id"])
-        ],
-        foreignKeys = [
-            ForeignKey(
-                entity = SectionModel::class,
-                parentColumns = ["csid"],
-                childColumns = ["section_id"]
-            ),
-            ForeignKey(
-                entity = ContentModel::class,
-                parentColumns = ["ccid"],
-                childColumns = ["content_id"]
-            )
         ]
     )
     data class SectionWithContent(
@@ -32,25 +22,34 @@ class SectionContentHolder {
         val order: Int
     )
 
-    class SectionContentPair(
+    data class SectionContentPair(
         @Embedded
         var section: SectionModel,
-        @Embedded
-        var content: ContentModel
+        @Relation(
+            parentColumn = "csid",
+            entity = ContentModel::class,
+            entityColumn = "ccid",
+            associateBy = Junction(
+                value = SectionWithContent::class,
+                parentColumn = "section_id",
+                entityColumn = "content_id"
+            )
+        ) var contents: List<ContentModel>
     )
 
-    data class SectionAndItsContents(
-        val section: SectionModel,
-        val contents: List<ContentModel>
+    data class NextContent(
+        var sectionId: String,
+        var contentId: String,
+        var contentable: String
     )
 
-    companion object {
-        fun groupContentBySection(sectionAndContent: List<SectionContentPair>): List<SectionAndItsContents> {
-            return mutableListOf<SectionAndItsContents>().also { items ->
-                sectionAndContent
-                    .groupBy(keySelector = { it.section }, valueTransform = { it.content })
-                    .forEach { items.add(SectionAndItsContents(it.key, it.value)) }
-            }
-        }
+    data class DownloadableContent(
+        var videoId: String,
+        var sectionId: String,
+        var contentId: String,
+        var name: String
+    ) {
+        @Ignore
+        var isDownloaded: Boolean = false
     }
 }

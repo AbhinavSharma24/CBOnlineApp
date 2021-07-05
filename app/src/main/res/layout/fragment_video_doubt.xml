@@ -4,35 +4,52 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:animateLayoutChanges="true"
-    android:background="@color/grey850"
     android:fitsSystemWindows="true"
-    tools:context=".player.doubts.VideoDoubtFragment">
+    tools:context=".mycourse.content.player.doubts.VideoDoubtFragment">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/doubtsRv"
+    <LinearLayout
+        android:id="@+id/noDoubtsLayout"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_margin="8dp"
-        tools:listitem="@layout/item_doubt" />
-
-    <TextView
-        android:id="@+id/emptyTv"
-        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="@string/empty_doubts_text"
-        android:textColor="@color/salmon"
-        android:textSize="20sp"
-        android:visibility="gone" />
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="gone">
 
+        <ImageView
+            android:layout_width="75dp"
+            android:layout_height="75dp"
+            android:src="@drawable/ic_doubt_gradient" />
 
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/doubtFab"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="right|bottom"
-        android:layout_margin="16dp"
-        android:src="@android:drawable/ic_input_add"
-        android:visibility="gone" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/margin_medium"
+            android:fontFamily="@font/gilroy_bold"
+            android:text="@string/no_doubts"
+            android:textAlignment="center"
+            android:textColor="@color/orangish"
+            android:textSize="18sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/margin_extra_small"
+            android:fontFamily="@font/gilroy_bold"
+            android:text="@string/click_to_add_doubt"
+            android:textAlignment="center"
+            android:textColor="@color/dark_white"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/playerDoubtRv"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:overScrollMode="never"
+        android:visibility="visible"
+        tools:itemCount="4"
+        tools:listitem="@layout/item_doubts" />
 
 </FrameLayout>

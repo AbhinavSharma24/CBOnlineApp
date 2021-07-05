@@ -6,7 +6,7 @@ interface NotificationClickListener {
 
 interface SectionListClickListener {
 
-    fun onClick(pos: Int)
+    fun onClick(pos: Int, adapterPosition: Int)
 }
 
 interface OnCartItemClickListener {
@@ -17,8 +17,6 @@ interface DownloadStarter {
     fun startDownload(videoId: String, contentId: String, title: String, attemptId: String, sectionId: String)
 
     fun startSectionDownlod(sectionId: String)
-
-    fun updateProgress(contentId: String, progressId: String)
 }
 
 interface OnItemClickListener {

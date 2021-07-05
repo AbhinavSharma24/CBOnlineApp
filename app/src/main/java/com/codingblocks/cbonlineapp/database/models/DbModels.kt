@@ -7,7 +7,8 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.codingblocks.cbonlineapp.CBOnlineApp
 import com.codingblocks.cbonlineapp.util.FileUtils
-import com.codingblocks.onlineapi.models.CourseId
+import com.codingblocks.onlineapi.models.Course
+import java.io.Serializable
 import java.sql.Date
 
 @Entity
@@ -16,11 +17,12 @@ data class ContentLecture(
     var lectureName: String = "",
     var lectureDuration: Long = 0L,
     var lectureId: String = "",
-    var lectureContentId: String = "",
+    var lectureSectionId: String = "",
     var lectureUpdatedAt: String = "",
-    var isDownloaded: Boolean = FileUtils.checkDownloadFileExists(CBOnlineApp.mInstance, lectureId),
-    var date: Date = Date(0L)
-)
+    var isDownloaded: Boolean = if (lectureId.isEmpty()) false else FileUtils.checkDownloadFileExists(CBOnlineApp.mInstance, lectureId),
+    var date: Date = Date(0L),
+    var lectureContentId: String = ""
+) : BaseModel()
 
 @Entity
 data class ContentDocument(
@@ -53,7 +55,7 @@ data class ContentCodeChallenge(
 )
 
 @Entity
-data class ContentQna(
+data class ContentQnaModel(
     var qnaUid: String = "",
     var qnaName: String = "",
     var qnaQid: Int = 0,
@@ -71,33 +73,13 @@ data class ContentCsvModel(
 )
 
 @Entity(
-    indices = [Index("contentId")],
-    foreignKeys = [(ForeignKey(
-        entity = ContentModel::class,
-        parentColumns = ["ccid"],
-        childColumns = ["contentId"],
-        onDelete = ForeignKey.CASCADE // or CASCADE
-    ))]
-)
-data class DoubtsModel(
-    @PrimaryKey
-    var dbtUid: String = "",
-    var title: String = "",
-    var body: String = "",
-    var contentId: String = "",
-    var status: String = "",
-    var runAttemptId: String = "",
-    var discourseTopicId: String = ""
-)
-
-@Entity(
-    indices = [Index("contentId")],
-    foreignKeys = [(ForeignKey(
-        entity = ContentModel::class,
-        parentColumns = ["ccid"],
-        childColumns = ["contentId"],
-        onDelete = ForeignKey.CASCADE // or CASCADE
-    ))]
+//    indices = [Index("contentId")],
+//    foreignKeys = [(ForeignKey(
+//        entity = ContentModel::class,
+//        parentColumns = ["ccid"],
+//        childColumns = ["contentId"],
+//        onDelete = ForeignKey.CASCADE
+//    ))]
 )
 data class NotesModel(
     @PrimaryKey
@@ -107,8 +89,9 @@ data class NotesModel(
     var contentId: String = "",
     var runAttemptId: String = "",
     var createdAt: String = "",
-    var deletedAt: String = ""
-)
+    var deletedAt: String? = "",
+    val contentTitle: String = ""
+) : BaseModel(), Serializable
 
 @Entity
 data class Notification(
@@ -120,6 +103,43 @@ data class Notification(
     val seen: Boolean = false,
     val videoId: String = ""
 )
+
+@Entity
+data class HBRankModel(
+    val bestRank: Int = 0,
+    val bestRankAchievedOn: String = "",
+    val currentMonthScore: Int = 0,
+    val currentOverallRank: Int = 0,
+    val previousMonthScore: Int = 0,
+    val previousOverallRank: Int = 0,
+    @PrimaryKey
+    val id: Long = 0
+)
+
+@Entity(
+    indices = [Index("contentId")],
+    foreignKeys = [
+        (
+            ForeignKey(
+                entity = ContentModel::class,
+                parentColumns = ["ccid"],
+                childColumns = ["contentId"],
+                onDelete = ForeignKey.CASCADE
+            )
+            )
+    ]
+)
+data class BookmarkModel(
+    @PrimaryKey
+    var bookmarkUid: String = "",
+    var runAttemptId: String = "",
+    var contentId: String = "",
+    var sectionId: String = "",
+    var createdAt: String = "",
+    var sectionName: String = "",
+    var contentName: String = "",
+    var contentable: String = ""
+) : BaseModel()
 
 @Entity
 data class JobsModel(
@@ -137,7 +157,7 @@ data class JobsModel(
     val title: String,
     @Embedded
     val company: Companies,
-    val courseId: ArrayList<CourseId>
+    val courseId: ArrayList<Course>
 )
 
 class FormModel(
@@ -145,6 +165,19 @@ class FormModel(
     val required: Boolean,
     val title: String,
     val type: String
+)
+
+data class CodeModel(
+    val codeUid: String,
+    val codeContestId: Int,
+    val attempt_id: String
+)
+
+data class PdfModel(
+    val documentPdfLink: String,
+    val documentName: String,
+    val attempt_id: String,
+    val title:String
 )
 
 @Entity
@@ -155,3 +188,52 @@ data class Companies(
     val companyDescription: String,
     val website: String
 )
+
+@Entity
+data class CodeChallengeModel(
+    @PrimaryKey
+    val id: String,
+    val difficulty: String,
+    val title: String,
+    @Embedded
+    val content: ProblemModel? = null
+)
+
+@Entity
+data class ProblemModel(
+    val name: String,
+    val image: String,
+    val status: String,
+    @Embedded
+    val details: CodeDetailsModel,
+    @Embedded
+    val timeLimits: TimeLimitsModel
+)
+
+@Entity
+data class TimeLimitsModel(
+    val cpp: String,
+    val c: String,
+    val py2: String,
+    val py3: String,
+    val js: String,
+    val csharp: String,
+    val java: String
+)
+
+@Entity
+data class CodeDetailsModel(
+    val constraints: String,
+    val explanation: String,
+    val inputFormat: String,
+    val sampleInput: String,
+    val outputFormat: String,
+    val sampleOutput: String,
+    val description: String
+)
+
+open class BaseModel()
+
+enum class LibraryTypes {
+    NOTE, NOTESVIDEO, BOOKMARK, DOWNLOADS
+}

@@ -13,6 +13,11 @@ import com.codingblocks.cbonlineapp.util.extensions.sameAndEqual
 class SectionItemsAdapter : ListAdapter<ListObject, RecyclerView.ViewHolder>(diffCallback) {
 
     var starter: DownloadStarter? = null
+    var onItemClick: ((ListObject) -> Unit)? = null
+
+    init {
+        setHasStableIds(true)
+    }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (holder.itemViewType) {
@@ -20,11 +25,12 @@ class SectionItemsAdapter : ListAdapter<ListObject, RecyclerView.ViewHolder>(dif
                 val section = getItem(position) as SectionModel
                 val sectionViewHolder = holder as SectionViewHolder
                 sectionViewHolder.bindTo(section)
+                sectionViewHolder.starterListener = starter
             }
             ListObject.TYPE_CONTENT -> {
                 val content = getItem(position) as ContentModel
                 val contentViewHolder = holder as ContentViewHolder
-                contentViewHolder.bindTo(content)
+                contentViewHolder.bindTo(content, onItemClick)
                 contentViewHolder.starterListener = starter
             }
         }
@@ -41,11 +47,21 @@ class SectionItemsAdapter : ListAdapter<ListObject, RecyclerView.ViewHolder>(dif
         return getItem(position).getType()
     }
 
-    companion object {
+    override fun getItemId(position: Int): Long {
+        return when (currentList[position].getType()) {
+            ListObject.TYPE_SECTION -> (getItem(position) as SectionModel).csid.toLong()
+            else -> (getItem(position) as ContentModel).ccid.toLong()
+        }
+    }
 
+    companion object {
         private val diffCallback = object : DiffUtil.ItemCallback<ListObject>() {
             override fun areItemsTheSame(oldItem: ListObject, newItem: ListObject): Boolean =
-                oldItem.sameAndEqual(newItem)
+                when (oldItem) {
+                    is SectionModel -> if (newItem is SectionModel) oldItem.csid == newItem.csid else false
+                    is ContentModel -> if (newItem is ContentModel) oldItem.ccid == newItem.ccid else false
+                    else -> false
+                }
 
             /**
              * Note that in kotlin, == checking on data classes compares all contents, but in Java,

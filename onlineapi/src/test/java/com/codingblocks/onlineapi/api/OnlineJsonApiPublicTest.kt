@@ -1,47 +1,76 @@
 package com.codingblocks.onlineapi.api
 
-import com.codingblocks.onlineapi.Clients
-import org.junit.Assert.assertNotNull
+import com.codingblocks.onlineapi.CBOnlineCommunicator
+import com.codingblocks.onlineapi.CBOnlineLib
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert
+import org.junit.Before
 import org.junit.Test
 
 class OnlineJsonApiPublicTest {
-    val api = Clients.onlineV2JsonApi
+    lateinit var api: OnlineJsonApi
+    lateinit var hackApi: OnlineRestApi
 
-    @Test
-    fun `GET courses|{id}`() {
-        val course = api.courseById("26").execute().body()
-        assertNotNull(course)
+    @Before
+    fun `SET JWT`() {
+
+        val jwt = "invalid"
+        val refreshToken = "invalid"
+
+        CBOnlineLib.initialize(object : CBOnlineCommunicator {
+            override var authJwt: String
+                get() = jwt
+                set(value) {}
+            override var refreshToken: String
+                get() = refreshToken
+                set(value) {}
+            override var baseUrl: String
+                get() = "api-online.codingblocks.xyz"
+                set(value) {}
+        })
+        api = CBOnlineLib.onlineV2JsonApi
+        hackApi = CBOnlineLib.hackapi
     }
 
     @Test
-    fun `GET instructor`() {
-        val instructor = api.instructorsById("6").execute().body()
-        assertNotNull(instructor)
+    fun `GET courses|{id}`() = runBlocking {
+        val course = api.getCourse("26").body()
+        Assert.assertNotNull(course)
     }
 
     @Test
-    fun `GET recommended`() {
-        val courses = api.getRecommendedCourses().execute().body()
-        assertNotNull(courses)
+    fun `GET instructor`() = runBlocking {
+        val instructor = api.getInstructor("6").body()
+        Assert.assertNotNull(instructor)
     }
 
     @Test
-    fun `GET instructors`() {
-        val instructors = api.instructors().execute().body()
-        assertNotNull(instructors)
+    fun `GET recommended`() = runBlocking {
+        val courses = api.getRecommendedCourses().body()
+        Assert.assertNotNull(courses)
     }
 
     @Test
-    fun `GET allcourses`(){
-        val courses = api.getAllCourses().execute().body()
-        assertNotNull(courses)
+    fun `GET instructors`() = runBlocking {
+        val instructors = api.getAllInstructors().body()
+        Assert.assertNotNull(instructors)
     }
 
     @Test
-    fun `GET carouselCards`(){
-        val carouselCards = api.carouselCards.execute().body()
-        assertNotNull(carouselCards)
+    fun `GET allcourses`() = runBlocking {
+        val courses = api.getAllCourses("0").body()
+        Assert.assertNotNull(courses)
     }
 
+    @Test
+    fun `GET carouselCards`() = runBlocking {
+        val carouselCards = api.getCarouselCards().body()
+        Assert.assertNotNull(carouselCards)
+    }
 
+    @Test
+    fun `GET fetchBanners`() = runBlocking {
+        val banners = hackApi.getBanner().body()
+        Assert.assertNotNull(banners)
+    }
 }

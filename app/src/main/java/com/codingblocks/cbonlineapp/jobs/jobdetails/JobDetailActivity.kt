@@ -1,45 +1,42 @@
 package com.codingblocks.cbonlineapp.jobs.jobdetails
 
-import android.content.Context
 import android.os.Bundle
 import android.util.TypedValue
-import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.distinctUntilChanged
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.codingblocks.cbonlineapp.R
-import com.codingblocks.cbonlineapp.home.CourseDataAdapter
+import com.codingblocks.cbonlineapp.baseclasses.BaseCBActivity
 import com.codingblocks.cbonlineapp.util.JOB_ID
 import com.codingblocks.cbonlineapp.util.extensions.getSpannableSring
-import com.codingblocks.cbonlineapp.util.extensions.isotomillisecond
-import com.codingblocks.cbonlineapp.util.extensions.loadImage
-import com.codingblocks.cbonlineapp.util.extensions.observeOnce
-import com.codingblocks.cbonlineapp.util.extensions.observer
-import com.codingblocks.cbonlineapp.util.extensions.timeAgo
+import com.codingblocks.cbonlineapp.util.glide.loadImage
+import com.codingblocks.cbonlineapp.util.livedata.nonNull
+import com.codingblocks.cbonlineapp.util.livedata.observeOnce
+import com.codingblocks.cbonlineapp.util.livedata.observer
 import com.codingblocks.onlineapi.models.Applications
 import com.codingblocks.onlineapi.models.Form
 import com.codingblocks.onlineapi.models.JobId
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.gson.JsonObject
-import io.github.inflationx.viewpump.ViewPumpContextWrapper
 import kotlinx.android.synthetic.main.activity_job_detail.*
 import kotlinx.android.synthetic.main.custom_form_dialog.view.*
 import kotlinx.android.synthetic.main.item_job.*
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
-class JobDetailActivity : AppCompatActivity() {
+class JobDetailActivity : BaseCBActivity() {
 
     private val viewModel by viewModel<JobDetailViewModel>()
 
-    private lateinit var courseDataAdapter: CourseDataAdapter
+//    private lateinit var courseDataAdapter: CourseDataAdapter
 
     lateinit var jobId: String
 
@@ -53,23 +50,15 @@ class JobDetailActivity : AppCompatActivity() {
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
-        jobId = intent.getStringExtra(JOB_ID)
+        jobId = intent?.getStringExtra(JOB_ID) ?: ""
 
-        deadlinell.visibility = View.GONE
+//        deadlinell.visibility = View.GONE
 
         viewModel.fetchJob(jobId)
 
-//        courseDataAdapter =
-//            CourseDataAdapter(
-//                ArrayList(),
-//                viewModel.getCourseDao(),
-//                this,
-//                viewModel.getCourseWithInstructorDao(),
-//                "allCourses"
-//            )
-
+//        courseDataAdapter = CourseDataAdapter()
         rvJobCourses.layoutManager = LinearLayoutManager(this)
-        rvJobCourses.adapter = courseDataAdapter
+//        rvJobCourses.adapter = courseDataAdapter
 
         jobDescriptionBtn.setOnClickListener {
             cardJobDescription.isVisible = !cardJobDescription.isVisible
@@ -85,7 +74,7 @@ class JobDetailActivity : AppCompatActivity() {
                 jobTitleTv.text = title
                 supportActionBar?.title = title
                 companyTv.text = company.name
-                postedAgoTv.text = timeAgo(postedOn.isotomillisecond())
+//                postedAgoTv.text = timeAgo(postedOn.isotomillisecond())
                 locationTv.text = getSpannableSring("Job Location: ", location)
                 experienceTv.text = getSpannableSring("Experience: ", experience)
                 typeTv.text = getSpannableSring("Job Type: ", type)
@@ -93,19 +82,18 @@ class JobDetailActivity : AppCompatActivity() {
                 jobDescriptionTv.text = description
                 companyDescriptionTv.text = company.companyDescription
                 eligibleTv.text = "Eligibility:    $eligibility"
-                viewModel.getCourses(courseId)
+                viewModel.courseIdList.postValue(courseId)
             }
         }
 
-//        viewModel.jobCourses.observer(this) {
-//            courseDataAdapter.setData(it as ArrayList<CourseRun>)
-//        }
-
+        viewModel.jobCourses.distinctUntilChanged().nonNull().observer(this) {
+            //            courseDataAdapter.submitList(it)
+        }
         viewModel.eligibleLiveData.observer(this) {
             when (it) {
                 "eligible" -> statusTv.text = getString(R.string.job_eligible)
                 "not eligible" -> {
-                    statusTv.setTextColor(resources.getColor(R.color.salmon))
+                    statusTv.setTextColor(ContextCompat.getColor(this, R.color.salmon))
                     statusTv.text = getString(R.string.job_not_eligible)
                     addResumeBtn.isVisible = false
                 }
@@ -126,14 +114,15 @@ class JobDetailActivity : AppCompatActivity() {
         val sizeInDP = 8
 
         val marginInDp = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, sizeInDP.toFloat(), resources
-            .displayMetrics
+            TypedValue.COMPLEX_UNIT_DIP, sizeInDP.toFloat(),
+            resources
+                .displayMetrics
         ).toInt()
         params.setMargins(marginInDp, marginInDp / 2, marginInDp, marginInDp / 2)
         val formView = layoutInflater.inflate(R.layout.custom_form_dialog, null)
         val formlayout = formView.form
         formData.observer(this) {
-            it.forEachIndexed { index, it ->
+            it.forEachIndexed { _, it: Form ->
                 if (it.type == "text-field") {
                     val inputLayout = TextInputLayout(
                         this,
@@ -167,9 +156,9 @@ class JobDetailActivity : AppCompatActivity() {
                         }
                     }
                     inputLayout.boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
-                    inputLayout.setBoxCornerRadii(20f, 20f, 20f, 20f)
+//                    inputLayout.setBoxCornerRadii(20f, 20f, 20f, 20f)
                     val edittext = TextInputEditText(inputLayout.context)
-                    edittext.setOnFocusChangeListener { view, b ->
+                    edittext.setOnFocusChangeListener { _, _ ->
                     }
                     inputLayout.addView(edittext)
                     inputLayout.tag = it.name
@@ -182,9 +171,9 @@ class JobDetailActivity : AppCompatActivity() {
                         layoutParams = params
                     }
                     formlayout.addView(title)
-                    val optionsArray = it.options?.split(",")
+                    val optionsArray = it.options.split(",")
 
-                    val rb = arrayOfNulls<RadioButton>(optionsArray!!.size)
+                    val rb = arrayOfNulls<RadioButton>(optionsArray.size)
                     val rg = RadioGroup(this) // create the RadioGroup
                     rg.layoutParams = params
                     rg.orientation = RadioGroup.VERTICAL // or RadioGroup.VERTICAL
@@ -214,23 +203,15 @@ class JobDetailActivity : AppCompatActivity() {
                     } else if (form.type == "radio-group") {
                         val group = formlayout.findViewWithTag<RadioGroup>(form.name)
                         val radioButton = findViewById<RadioButton>(group.checkedRadioButtonId)
-                        val optionsArray = form.options?.split(",")
+                        val optionsArray = form.options.split(",")
                         val selected_value: String = radioButton?.text?.toString()
-                            ?: (optionsArray?.get(0) ?: "")
+                            ?: optionsArray[0]
                         jsonObject.addProperty(form.name, selected_value)
                     }
                 }
                 formDialog.dismiss()
 //                if (!BuildConfig.DEBUG)
                 viewModel.applyJob(Applications(jsonObject, job = JobId(jobId)))
-            }
-            formView.cancelBtn.setOnClickListener { view ->
-                it.forEach { form ->
-                    if (form.type == "text-field") {
-                        val inputLayout = formlayout.findViewWithTag<TextInputLayout>(form.name)
-                        inputLayout.editText?.setText("")
-                    }
-                }
             }
         }
 
@@ -243,9 +224,5 @@ class JobDetailActivity : AppCompatActivity() {
                 window?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
             }
         }
-    }
-
-    override fun attachBaseContext(newBase: Context) {
-        super.attachBaseContext(ViewPumpContextWrapper.wrap(newBase))
     }
 }

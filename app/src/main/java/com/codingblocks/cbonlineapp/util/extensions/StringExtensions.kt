@@ -1,19 +1,22 @@
 package com.codingblocks.cbonlineapp.util.extensions
 
+import android.graphics.Color
 import android.text.SpannableStringBuilder
 import androidx.core.text.bold
+import androidx.core.text.color
+import org.ocpsoft.prettytime.PrettyTime
 import java.io.File
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Locale
-import java.util.TimeZone
+import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.NoSuchElementException
+import kotlin.math.floor
+import kotlin.math.log10
 
 fun folderSize(directory: File): Long {
     var length: Long = 0
-    for (file in directory.listFiles()) {
+    directory.listFiles()?.forEach { file ->
         length += if (file.isFile)
             file.length()
         else
@@ -25,7 +28,7 @@ fun folderSize(directory: File): Long {
 fun Long.readableFileSize(): String {
     if (this <= 0) return "0 MB"
     val units = arrayOf("B", "kB", "MB", "GB", "TB")
-    val digitGroups = (Math.log10(this.toDouble()) / Math.log10(1024.0)).toInt()
+    val digitGroups = (log10(this.toDouble()) / log10(1024.0)).toInt()
     return DecimalFormat("#,##0.#").format(
         this / Math.pow(
             1024.0,
@@ -35,7 +38,19 @@ fun Long.readableFileSize(): String {
 }
 
 fun String.greater(): Boolean {
-    return this.toLong() >= (System.currentTimeMillis() / 1000)
+    return this.toLong() <= (System.currentTimeMillis() / 1000)
+}
+
+fun String.timeAgo(): String {
+    return if (this.isEmpty())
+        ""
+    else {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.ENGLISH)
+        sdf.timeZone = TimeZone.getTimeZone("GMT")
+        val time = sdf.parse(this).time
+        val prettyTime = PrettyTime(Locale.getDefault())
+        prettyTime.format(Date(time))
+    }
 }
 
 fun Long.getDurationBreakdown(): String {
@@ -65,7 +80,7 @@ fun formatDate(date: String): String {
     calender.time = newDate
     calender.add(Calendar.HOUR, 5)
     calender.add(Calendar.MINUTE, 30)
-    format = SimpleDateFormat("MMM dd yyyy hh:mm a", Locale.US)
+    format = SimpleDateFormat("dd.MM.yy | hh:mma", Locale.US)
     return format.format(calender.time)
 }
 
@@ -76,8 +91,8 @@ fun String.isotomillisecond(): Long {
     return newDate.time
 }
 
-fun secToTime(time: Double): String {
-    val sec = time.toInt()
+fun Double.secToTime(): String {
+    val sec = this.toInt()
     val seconds = sec % 60
     var minutes = sec / 60
     if (minutes >= 60) {
@@ -89,12 +104,12 @@ fun secToTime(time: Double): String {
         }
         return String.format("%02d:%02d:%02d", hours, minutes, seconds)
     }
-    return String.format("00:%02d:%02d", minutes, seconds)
+    return String.format("%02d:%02d", minutes, seconds)
 }
 
 fun getDateForTime(time: String): String {
-    val dateFormat = SimpleDateFormat("dd-MMM-yy", Locale.US)
-    dateFormat.timeZone = TimeZone.getTimeZone("UTC")
+    val dateFormat = SimpleDateFormat("dd MMM " + "''" + "yy", Locale.US)
+    dateFormat.timeZone = TimeZone.getTimeZone("IST")
 
     val calendar = Calendar.getInstance()
     calendar.timeInMillis = time.toLong() * 1000
@@ -112,36 +127,59 @@ fun getDate(): String {
     return dateFormat.format(calendar.time)
 }
 
-fun getSpannableSring(normalText: String, boldText: String): SpannableStringBuilder =
+fun getDateForRun(time: String): String {
+    val dateFormat = SimpleDateFormat("MMM " + "''" + "yy", Locale.getDefault())
+    dateFormat.timeZone = TimeZone.getDefault()
+
+    val calendar = Calendar.getInstance()
+    calendar.timeInMillis = time.toLong() * 1000
+    calendar.timeZone = TimeZone.getTimeZone("IST")
+    return dateFormat.format(calendar.time)
+}
+
+fun getSpannableSring(boldText: String, normalText: String): SpannableStringBuilder =
+    SpannableStringBuilder()
+        .bold { append(boldText) }
+        .append(normalText)
+
+fun getSpannableString(text: String): SpannableStringBuilder =
+    SpannableStringBuilder()
+        .color(Color.parseColor("#f2734c")) {
+            append(text)
+        }
+
+fun getSpannableStringSecondBold(normalText: String, boldText: String): SpannableStringBuilder =
     SpannableStringBuilder()
         .append(normalText)
         .bold { append(boldText) }
 
 fun timeAgo(time: Long): String {
-    val diff = Math.floor(((System.currentTimeMillis() - time) / 1000).toDouble())
-    var interval = Math.floor(diff / 31536000).toInt()
+    val diff = floor(((System.currentTimeMillis() - time) / 1000).toDouble())
+    var interval = floor(diff / 31536000).toInt()
     if (interval >= 1) {
         return "$interval Years Ago"
     }
-    interval = Math.floor(diff / 2592000).toInt()
+    interval = floor(diff / 2592000).toInt()
     if (interval >= 1) {
         return "$interval Months Ago"
     }
-    interval = Math.floor(diff / 604800).toInt()
+    interval = floor(diff / 604800).toInt()
     if (interval >= 1) {
         return "$interval Weeks Ago"
     }
-    interval = Math.floor(diff / 86400).toInt()
+    interval = floor(diff / 86400).toInt()
     if (interval >= 1) {
         return "$interval Days Ago"
     }
-    interval = Math.floor(diff / 3600).toInt()
+    interval = floor(diff / 3600).toInt()
     if (interval >= 1) {
         return "$interval Hours Ago"
     }
-    interval = Math.floor(diff / 60).toInt()
+    interval = floor(diff / 60).toInt()
     if (interval >= 1) {
         return "$interval Minutes Ago"
     }
     return "Just Now"
 }
+
+fun Double.round(decimals: Int = 2): Double = "%.${decimals}f".format(this).toDouble()

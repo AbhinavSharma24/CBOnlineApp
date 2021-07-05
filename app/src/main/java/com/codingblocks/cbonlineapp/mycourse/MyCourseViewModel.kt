@@ -1,299 +1,327 @@
 package com.codingblocks.cbonlineapp.mycourse
 
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.widget.Toast
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
-import com.codingblocks.cbonlineapp.database.ContentDao
-import com.codingblocks.cbonlineapp.database.CourseRunDao
-import com.codingblocks.cbonlineapp.database.CourseWithInstructorDao
-import com.codingblocks.cbonlineapp.database.SectionDao
-import com.codingblocks.cbonlineapp.database.SectionWithContentsDao
-import com.codingblocks.cbonlineapp.database.models.ContentCodeChallenge
-import com.codingblocks.cbonlineapp.database.models.ContentCsvModel
-import com.codingblocks.cbonlineapp.database.models.ContentDocument
-import com.codingblocks.cbonlineapp.database.models.ContentLecture
-import com.codingblocks.cbonlineapp.database.models.ContentModel
-import com.codingblocks.cbonlineapp.database.models.ContentQna
-import com.codingblocks.cbonlineapp.database.models.ContentVideo
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.Transformations
+import androidx.lifecycle.liveData
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import com.codingblocks.cbonlineapp.baseclasses.BaseCBViewModel
+import com.codingblocks.cbonlineapp.database.models.CourseRunPair
+import com.codingblocks.cbonlineapp.database.models.RunPerformance
 import com.codingblocks.cbonlineapp.database.models.SectionContentHolder
-import com.codingblocks.cbonlineapp.database.models.SectionModel
-import com.codingblocks.cbonlineapp.util.SingleLiveEvent
-import com.codingblocks.cbonlineapp.util.extensions.retrofitCallback
-import com.codingblocks.onlineapi.Clients
-import com.codingblocks.onlineapi.models.ProductExtensionsItem
+import com.codingblocks.cbonlineapp.util.CONTENT_ID
+import com.codingblocks.cbonlineapp.util.COURSE_ID
+import com.codingblocks.cbonlineapp.util.COURSE_NAME
+import com.codingblocks.cbonlineapp.util.PREMIUM
+import com.codingblocks.cbonlineapp.util.PreferenceHelper
+import com.codingblocks.cbonlineapp.util.RUN_ATTEMPT_ID
+import com.codingblocks.cbonlineapp.util.RUN_ID
+import com.codingblocks.cbonlineapp.util.extensions.runIO
+import com.codingblocks.cbonlineapp.util.extensions.savedStateValue
+import com.codingblocks.cbonlineapp.util.livedata.DoubleTrigger
+import com.codingblocks.cbonlineapp.workers.ProgressWorker
+import com.codingblocks.onlineapi.ResultWrapper
+import com.codingblocks.onlineapi.fetchError
+import com.codingblocks.onlineapi.models.Leaderboard
 import com.codingblocks.onlineapi.models.ResetRunAttempt
+import com.codingblocks.onlineapi.models.SendFeedback
+import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.TimeUnit
 
 class MyCourseViewModel(
-    private val runDao: CourseRunDao,
-    private val sectionWithContentsDao: SectionWithContentsDao,
-    private val contentsDao: ContentDao,
-    private val sectionDao: SectionDao,
-    private val instructorDao: CourseWithInstructorDao
-) : ViewModel() {
+    private val handle: SavedStateHandle,
+    private val repo: MyCourseRepository,
+    val prefs: PreferenceHelper
+) : BaseCBViewModel() {
+
+    var attemptId by savedStateValue<String>(handle, RUN_ATTEMPT_ID)
+    var name by savedStateValue<String>(handle, COURSE_NAME)
+    var runId by savedStateValue<String>(handle, RUN_ID)
+    var premiumRun by savedStateValue<Boolean>(handle, PREMIUM)
+    var courseId by savedStateValue<String>(handle, COURSE_ID)
 
     var progress: MutableLiveData<Boolean> = MutableLiveData()
-    var revoked: MutableLiveData<Boolean> = MutableLiveData()
-    var attemptId: String = ""
-    var runId: String = ""
-    var courseId: String = ""
-    private val mutablePopMessage = SingleLiveEvent<String>()
-    private val extensions = MutableLiveData<List<ProductExtensionsItem>>()
-    val popMessage: LiveData<String> = mutablePopMessage
-    var resetProgress: MutableLiveData<Boolean> = MutableLiveData()
 
-    fun getAllContent() = sectionWithContentsDao.getSectionWithContent(attemptId)
+    /** MutableLiveData Filters for [SectionContentHolder.SectionContentPair]. */
+    var filters: MutableLiveData<String> = MutableLiveData()
+    var complete: MutableLiveData<String> = MutableLiveData("")
+    var content: LiveData<List<SectionContentHolder.SectionContentPair>> = MutableLiveData()
 
-    fun updatehit(attemptId: String) {
-        runDao.updateHit(attemptId)
+    init {
+        getPerformance()
+        content = Transformations.switchMap(DoubleTrigger(complete, filters)) {
+            attemptId?.let {
+                getStats()
+                repo.getSectionWithContent(it)
+            }
+        }
     }
 
-    fun getResumeCourse() = sectionWithContentsDao.resumeCourse(attemptId)
+    var runStartEnd: Pair<Long, Long>
+        get() {
+            return handle["runStartEnd"] ?: Pair(0L, 0L)
+        }
+        set(value) {
+            handle.set("runStartEnd", value)
+        }
 
-    fun getRun() = runDao.getRun(runId)
+    val performance: LiveData<RunPerformance>? by lazy {
+        attemptId?.let { repo.getRunStats(it) }
+    }
 
-    fun fetchCourse(attemptId: String) {
-        Clients.onlineV2JsonApi.enrolledCourseById(attemptId)
-            .enqueue(retrofitCallback { _, response ->
-                response?.let { runAttempt ->
-                    if (runAttempt.isSuccessful) {
-                        runAttempt.body()?.run?.sections?.let { sectionList ->
-                            sectionList.forEach { courseSection ->
-                                courseSection.run {
-                                    val newSection = SectionModel(
-                                        id, name,
-                                        order, premium, status,
-                                        runId, attemptId
-                                    )
-                                    val oldSection = sectionDao.getSectionWithId(id)
-                                    if (oldSection == null)
-                                        sectionDao.insert(newSection)
-                                    else if (oldSection == newSection) {
-                                        sectionDao.update(newSection)
-                                    }
-                                    courseContentLinks?.related?.href?.substring(7)
-                                        ?.let { contentLink ->
-                                            Clients.onlineV2JsonApi.getSectionContents(
-                                                contentLink
-                                            )
-                                                .enqueue(
-                                                    retrofitCallback { _, contentResponse ->
-                                                        contentResponse?.let { contentList ->
-                                                            if (contentList.isSuccessful) {
-                                                                contentList.body()
-                                                                    ?.forEach { content ->
-                                                                        var contentDocument =
-                                                                            ContentDocument()
-                                                                        var contentLecture =
-                                                                            ContentLecture()
-                                                                        var contentVideo =
-                                                                            ContentVideo()
-                                                                        var contentQna =
-                                                                            ContentQna()
-                                                                        var contentCodeChallenge =
-                                                                            ContentCodeChallenge()
-                                                                        var contentCsv =
-                                                                            ContentCsvModel()
+    val run: LiveData<CourseRunPair>? by lazy {
+        attemptId?.let { repo.getRunById(it) }
+    }
 
-                                                                        when {
-                                                                            content.contentable == "lecture" -> content.lecture?.let { contentLectureType ->
-                                                                                contentLecture =
-                                                                                    ContentLecture(
-                                                                                        contentLectureType.id,
-                                                                                        contentLectureType.name
-                                                                                            ?: "",
-                                                                                        contentLectureType.duration
-                                                                                            ?: 0,
-                                                                                        contentLectureType.videoId
-                                                                                            ?: "",
-                                                                                        content.sectionContent?.id
-                                                                                            ?: "",
-                                                                                        contentLectureType.updatedAt
-                                                                                    )
-                                                                            }
-                                                                            content.contentable == "document" -> content.document?.let { contentDocumentType ->
-                                                                                contentDocument =
-                                                                                    ContentDocument(
-                                                                                        contentDocumentType.id,
-                                                                                        contentDocumentType.name
-                                                                                            ?: "",
-                                                                                        contentDocumentType.pdfLink
-                                                                                            ?: "",
-                                                                                        content.sectionContent?.id
-                                                                                            ?: "",
-                                                                                        contentDocumentType.updatedAt
-                                                                                    )
-                                                                            }
-                                                                            content.contentable == "video" -> content.video?.let { contentVideoType ->
-                                                                                contentVideo =
-                                                                                    ContentVideo(
-                                                                                        contentVideoType.id,
-                                                                                        contentVideoType.name
-                                                                                            ?: "",
-                                                                                        contentVideoType.duration
-                                                                                            ?: 0L,
-                                                                                        contentVideoType.description
-                                                                                            ?: "",
-                                                                                        contentVideoType.url
-                                                                                            ?: "",
-                                                                                        content.sectionContent?.id
-                                                                                            ?: "",
-                                                                                        contentVideoType.updatedAt
-                                                                                    )
-                                                                            }
-                                                                            content.contentable == "qna" -> content.qna?.let { contentQna1 ->
-                                                                                contentQna =
-                                                                                    ContentQna(
-                                                                                        contentQna1.id,
-                                                                                        contentQna1.name
-                                                                                            ?: "",
-                                                                                        contentQna1.qId
-                                                                                            ?: 0,
-                                                                                        content.sectionContent?.id
-                                                                                            ?: "",
-                                                                                        contentQna1.updatedAt
-                                                                                    )
-                                                                            }
-                                                                            content.contentable == "code_challenge" -> content.codeChallenge?.let { codeChallenge ->
-                                                                                contentCodeChallenge =
-                                                                                    ContentCodeChallenge(
-                                                                                        codeChallenge.id,
-                                                                                        codeChallenge.name
-                                                                                            ?: "",
-                                                                                        codeChallenge.hbProblemId
-                                                                                            ?: 0,
-                                                                                        codeChallenge.hbContestId
-                                                                                            ?: 0,
-                                                                                        content.sectionContent?.id
-                                                                                            ?: "",
-                                                                                        codeChallenge.updatedAt
-                                                                                    )
-                                                                            }
-                                                                            content.contentable == "csv" -> content.csv?.let {
-                                                                                contentCsv =
-                                                                                    ContentCsvModel(
-                                                                                        it.id,
-                                                                                        it.name
-                                                                                            ?: "",
-                                                                                        it.description
-                                                                                            ?: "",
-                                                                                        it.contentId
-                                                                                            ?: "",
-                                                                                        it.updatedAt
-                                                                                    )
-                                                                            }
-                                                                        }
-
-                                                                        var progressId = ""
-                                                                        val status: String
-                                                                        if (content.progress != null) {
-                                                                            status =
-                                                                                content.progress?.status
-                                                                                    ?: ""
-                                                                            progressId =
-                                                                                content.progress?.id
-                                                                                    ?: ""
-                                                                        } else {
-                                                                            status =
-                                                                                "UNDONE"
-                                                                        }
-
-                                                                        val newContent =
-                                                                            ContentModel(
-                                                                                content.id,
-                                                                                status,
-                                                                                progressId,
-                                                                                content.title,
-                                                                                content.duration
-                                                                                    ?: 0,
-                                                                                content.contentable,
-                                                                                content.sectionContent?.order
-                                                                                    ?: 0,
-                                                                                attemptId,
-                                                                                contentLecture,
-                                                                                contentDocument,
-                                                                                contentVideo,
-                                                                                contentQna,
-                                                                                contentCodeChallenge,
-                                                                                contentCsv
-                                                                            )
-
-                                                                        val oldContent =
-                                                                            contentsDao.getContentWithId(
-                                                                                attemptId,
-                                                                                content.id
-                                                                            )
-                                                                        if (oldContent == null) {
-
-                                                                            contentsDao.insert(
-                                                                                newContent
-                                                                            )
-                                                                            sectionWithContentsDao.insert(
-                                                                                SectionContentHolder.SectionWithContent(
-                                                                                    courseSection.id,
-                                                                                    content.id,
-                                                                                    content.sectionContent?.order
-                                                                                        ?: 0
-
-                                                                                )
-                                                                            )
-                                                                        } else if (oldContent != newContent) {
-                                                                            contentLecture.isDownloaded =
-                                                                                oldContent.contentLecture.isDownloaded
-                                                                            contentsDao.update(
-                                                                                newContent
-                                                                            )
-                                                                        }
-                                                                    }
-                                                            }
-                                                        }
-                                                    })
-                                        }
-                                }
-                            }
+    fun fetchSections(refresh: Boolean = false) {
+        runIO {
+            when (val response = attemptId?.let { repo.fetchSections(it) }) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> {
+                    if (response.value.isSuccessful)
+                        response.value.body()?.let { runAttempt ->
+                            repo.insertSections(runAttempt, refresh)
+                            progress.postValue(false)
                         }
-                        progress.value = false
-                    } else if (runAttempt.code() == 404) {
-                        revoked.value = true
+                    else {
+                        setError(fetchError(response.value.code()))
                     }
                 }
-            })
+            }
+        }
     }
 
-    fun resetProgress() {
-        val resetCourse = ResetRunAttempt(attemptId)
-        Clients.api.resetProgress(resetCourse).enqueue(retrofitCallback { _, response ->
-            resetProgress.value = response?.isSuccessful ?: false
-        })
+    fun getStats() {
+        runIO {
+            when (val response = attemptId?.let { repo.getStats(it) }) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        body()?.let { response ->
+                            attemptId?.let { repo.saveStats(response, it) }
+                        }
+                    } else {
+                        setError(fetchError(code()))
+                    }
+                }
+            }
+        }
     }
 
-    fun requestApproval() {
-        Clients.api.requestApproval(attemptId).enqueue(retrofitCallback { throwable, response ->
-            response.let {
-                if (it?.isSuccessful == true) {
-                    mutablePopMessage.value = it.body()?.string()
+    val resetProgress = liveData(Dispatchers.IO) {
+        when (val response = attemptId?.let { ResetRunAttempt(it) }?.let { repo.resetProgress(it) }) {
+            is ResultWrapper.GenericError -> setError(response.error)
+            is ResultWrapper.Success -> {
+                if (response.value.isSuccessful)
+                    emit(true)
+                else {
+                    setError(fetchError(response.value.code()))
+                }
+            }
+        }
+    }
+
+    val nextContent by lazy {
+        attemptId?.let { repo.getNextContent(it) }
+    }
+
+    fun updateProgress(contentId: String) {
+        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        val progressData: Data = workDataOf(CONTENT_ID to contentId, RUN_ATTEMPT_ID to attemptId)
+        val request: OneTimeWorkRequest =
+            OneTimeWorkRequestBuilder<ProgressWorker>()
+                .setConstraints(constraints)
+                .setInputData(progressData)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 20, TimeUnit.SECONDS)
+                .build()
+
+        WorkManager.getInstance()
+            .enqueue(request)
+    }
+
+    fun getLeaderboard() = liveData(Dispatchers.IO) {
+        when (val response = repo.fetchLeaderboard(runId!!)) {
+            is ResultWrapper.GenericError -> setError(response.error)
+            is ResultWrapper.Success -> with(response.value) {
+                if (isSuccessful) {
+                    body()?.let {
+                        emit(it)
+                    }
                 } else {
-                    mutablePopMessage.value = it?.errorBody()?.string()
+                    if (code() == 404)
+                        emit(emptyList<Leaderboard>())
+                    else
+                        setError(fetchError(code()))
                 }
             }
-            throwable.let {
-                mutablePopMessage.value = it?.message
-            }
-        })
+        }
     }
 
-    fun fetchExtensions(productId: Int): MutableLiveData<List<ProductExtensionsItem>> {
-        Clients.api.getExtensions(productId).enqueue(retrofitCallback { throwable, response ->
-            response?.body().let { list ->
-                if (response?.isSuccessful == true) {
-                    extensions.postValue(list?.productExtensions)
+    fun addToCart() = liveData(Dispatchers.IO) {
+        when (val response = runId?.let { repo.addToCart(it) }) {
+            is ResultWrapper.GenericError -> setError(response.error)
+            is ResultWrapper.Success -> with(response.value) {
+                if (isSuccessful) {
+                    emit(true)
+                } else {
+                    setError(fetchError(code()))
                 }
             }
-            throwable.let {
-                mutablePopMessage.value = it?.message
-            }
-        })
-        return extensions
+        }
     }
 
-    fun getInstructor() = instructorDao.getInstructorWithCourseId(courseId)
+    fun requestMentorApproval() {
+        runIO {
+            when (val response = attemptId?.let { repo.requestApproval(it) }) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (!isSuccessful) setError(fetchError(code()))
+                }
+            }
+        }
+    }
+
+    fun updateRunAttempt() {
+        runIO {
+            when (val response = attemptId?.let { repo.fetchSections(it) }) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (!isSuccessful) setError(fetchError(code()))
+                }
+            }
+        }
+    }
+
+    fun requestGoodies(name: String, address: String, postal: String, mobile: String?) {
+        // Todo - Complete this
+    }
+
+    fun downloadCertificateAndShow(context: Context, certificateUrl: String, fileName: String) {
+        if (certificateUrl.isNullOrEmpty() || fileName.isNullOrEmpty()) {
+            Toast.makeText(context, "Error fetching document", Toast.LENGTH_SHORT).show()
+        } else {
+            val uri = Uri.parse(certificateUrl)
+            val request = DownloadManager.Request(uri)
+            request.setMimeType("application/pdf")
+            request.setTitle("$fileName.pdf")
+            request.setDescription("Downloading attachment..")
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            request.setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName)
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(request)
+        }
+    }
+
+    private fun getPerformance() {
+        runIO {
+            val mRank = repo.getHackerBlocksPerformance().value
+            when (val response = repo.getPerformance()) {
+                is ResultWrapper.GenericError -> setError(response.error)
+                is ResultWrapper.Success -> with(response.value) {
+                    if (isSuccessful) {
+                        body()?.let { response ->
+                            if (mRank?.currentOverallRank != response.currentOverallRank) {
+                                repo.saveRank(response)
+                            }
+                        }
+                    } else {
+                        if (code() != 404)
+                            setError(fetchError(code()))
+                        else {
+                            // No HB Report
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun getHackerBlocksPerformance() = repo.getHackerBlocksPerformance()
+
+    fun pauseCourse() = liveData {
+        when (val response = repo.pauseCourse(attemptId)) {
+            is ResultWrapper.GenericError -> setError(response.error)
+            is ResultWrapper.Success -> with(response.value) {
+                if (isSuccessful) {
+                    body()?.let { repo.updateRunAttempt(it) }
+                    emit(true)
+                } else {
+                    errorLiveData.postValue("There was some error")
+                }
+            }
+        }
+    }
+
+    fun unPauseCourse() = liveData {
+        when (val response = repo.unPauseCourse(attemptId)) {
+            is ResultWrapper.GenericError -> setError(response.error)
+            is ResultWrapper.Success -> with(response.value) {
+                if (isSuccessful) {
+                    body()?.let { repo.updateRunAttempt(it) }
+                    emit(true)
+                } else {
+                    errorLiveData.postValue("There was some error")
+                }
+            }
+        }
+    }
+
+    fun sendFeedback(feedback: SendFeedback) = liveData {
+        when (val response = courseId?.let { repo.sendFeedback(it, feedback) }) {
+            is ResultWrapper.GenericError -> {
+                setError(response.error)
+            }
+            is ResultWrapper.Success -> with(response.value) {
+                if (isSuccessful) {
+                    emit(true)
+                } else {
+                    errorLiveData.postValue("There was some error")
+                }
+            }
+        }
+    }
+
+    fun getFeedback() = liveData {
+        when (val response = courseId?.let { repo.getFeedback(it) }) {
+            is ResultWrapper.GenericError -> {
+                setError(response.error)
+            }
+            is ResultWrapper.Success -> with(response.value) {
+                if (isSuccessful) {
+                    emit(body())
+                } else {
+                    errorLiveData.postValue("There was some error")
+                }
+            }
+        }
+    }
+
+    fun getRunAttempt() = repo.getRunAttempt(attemptId!!)
 }
+
+//    fun fetchExtensions(productId: Int): MutableLiveData<List<ProductExtensionsItem>> {
+//        CBOnlineLib.api.getExtensions(productId).enqueue(retrofitCallback { throwable, response ->
+//            response?.body().let { list ->
+//                if (response?.isSuccessful == true) {
+//                    extensions.postValue(list?.productExtensions)
+//                }
+//            }
+//            throwable.let {
+//                mutablePopMessage.value = it?.message
+//            }
+//        })
+//        return extensions
+//    }
